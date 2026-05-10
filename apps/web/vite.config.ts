@@ -8,8 +8,10 @@ export default defineConfig({
     port: 5173,
   },
   test: {
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     globals: true,
     setupFiles: './src/test-setup.ts',
+    exclude: ['e2e/**', 'playwright.config.ts', 'node_modules/**'],
   },
 })
