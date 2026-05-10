@@ -117,11 +117,25 @@ describe('App', () => {
     expect(
       screen.getByText('Use the job controls below for normal pipeline progress; only use source controls as a manual override.'),
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Apply manual source override' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Apply manual source override' })).not.toBeInTheDocument()
+    expect(
+      screen.getByText('Manual source overrides unlock after the active ingest job reaches a terminal state.'),
+    ).toBeInTheDocument()
   })
 
-  it('offers source status transitions and updates the source', async () => {
+  it('offers source status transitions and updates the source after ingest completes', async () => {
     const user = userEvent.setup()
+    mockApi.getProject.mockResolvedValue({
+      ...projectDetail,
+      jobs: [
+        {
+          ...projectDetail.jobs[0],
+          status: 'completed',
+          updated_at: '2026-05-10T00:10:00Z',
+        },
+        projectDetail.jobs[1],
+      ],
+    })
     render(<App />)
 
     const statusSelect = await screen.findByLabelText('Update status for source src_123')

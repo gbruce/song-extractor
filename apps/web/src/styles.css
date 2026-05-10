@@ -266,6 +266,10 @@ ul {
   color: #dfe8fb;
 }
 
+.override-locked-message {
+  color: #ffd38b;
+}
+
 a {
   color: #8fb7ff;
 }

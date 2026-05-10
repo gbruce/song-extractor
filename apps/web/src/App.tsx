@@ -434,6 +434,11 @@ function App() {
                                 .sort((left, right) => right.localeCompare(left))[0]
                             : null,
                       }
+                      const hasActiveIngestJob = sourceJobs.some(
+                        (job) =>
+                          job.job_type === 'ingest' &&
+                          (job.status === 'queued' || job.status === 'running'),
+                      )
 
                       return (
                         <li key={source.id} className="list-row detail-card">
@@ -467,39 +472,45 @@ function App() {
                               <span className="muted">No linked jobs yet.</span>
                             )}
                             {nextSourceStatuses.length > 0 ? (
-                              <>
-                                <span className="muted">
-                                  Next source transitions: {nextSourceStatuses.join(', ')}
+                              hasActiveIngestJob ? (
+                                <span className="muted override-locked-message">
+                                  Manual source overrides unlock after the active ingest job reaches a terminal state.
                                 </span>
-                                <div className="inline-actions">
-                                  <label className="stack-xs grow">
-                                    <span>Update status for source {source.id}</span>
-                                    <select
-                                      aria-label={`Update status for source ${source.id}`}
-                                      value={selectedSourceStatus}
-                                      onChange={(event) =>
-                                        setSourceStatusSelections((current) => ({
-                                          ...current,
-                                          [source.id]: event.target.value as SourceRecord['status'],
-                                        }))
-                                      }
+                              ) : (
+                                <>
+                                  <span className="muted">
+                                    Next source transitions: {nextSourceStatuses.join(', ')}
+                                  </span>
+                                  <div className="inline-actions">
+                                    <label className="stack-xs grow">
+                                      <span>Update status for source {source.id}</span>
+                                      <select
+                                        aria-label={`Update status for source ${source.id}`}
+                                        value={selectedSourceStatus}
+                                        onChange={(event) =>
+                                          setSourceStatusSelections((current) => ({
+                                            ...current,
+                                            [source.id]: event.target.value as SourceRecord['status'],
+                                          }))
+                                        }
+                                      >
+                                        {nextSourceStatuses.map((statusOption) => (
+                                          <option key={statusOption} value={statusOption}>
+                                            {statusOption}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <button
+                                      type="button"
+                                      disabled={loading || !selectedSourceStatus}
+                                      onClick={() => handleUpdateSourceStatus(source.id)}
                                     >
-                                      {nextSourceStatuses.map((statusOption) => (
-                                        <option key={statusOption} value={statusOption}>
-                                          {statusOption}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <button
-                                    type="button"
-                                    disabled={loading || !selectedSourceStatus}
-                                    onClick={() => handleUpdateSourceStatus(source.id)}
-                                  >
-                                    Apply manual source override
-                                  </button>
-                                </div>
-                              </>
+                                      Apply manual source override
+                                    </button>
+                                  </div>
+                                </>
+                              )
                             ) : (
                               <span className="muted">No further source transitions available.</span>
                             )}
