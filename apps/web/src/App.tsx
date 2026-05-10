@@ -453,6 +453,12 @@ function App() {
                               {sourceJobSummary.active} active • {sourceJobSummary.done} done •{' '}
                               {sourceJobSummary.failed} failed
                             </span>
+                            <div className="pipeline-note stack-xs" role="note" aria-label={`Pipeline guidance for source ${source.id}`}>
+                              <strong>Ingest jobs drive source status automatically.</strong>
+                              <span className="muted">
+                                Use the job controls below for normal pipeline progress; only use source controls as a manual override.
+                              </span>
+                            </div>
                             {sourceJobSummary.latestUpdatedAt ? (
                               <span className="muted">
                                 {formatTimestamp('Latest job update', sourceJobSummary.latestUpdatedAt)}
@@ -490,7 +496,7 @@ function App() {
                                     disabled={loading || !selectedSourceStatus}
                                     onClick={() => handleUpdateSourceStatus(source.id)}
                                   >
-                                    Apply source status
+                                    Apply manual source override
                                   </button>
                                 </div>
                               </>

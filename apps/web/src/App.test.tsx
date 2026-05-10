@@ -106,13 +106,18 @@ describe('App', () => {
     expect(screen.getByText('No further transitions available.')).toBeInTheDocument()
   })
 
-  it('renders source status badges and linked job summaries', async () => {
+  it('renders source status badges, linked job summaries, and ingest sync guidance', async () => {
     render(<App />)
 
     expect(await screen.findByText('Submitted • awaiting processing')).toBeInTheDocument()
     expect(screen.getByText('2 linked jobs')).toBeInTheDocument()
     expect(screen.getByText('1 active • 1 done • 0 failed')).toBeInTheDocument()
     expect(screen.getByText('Latest job update: 2026-05-10T00:09:00Z')).toBeInTheDocument()
+    expect(screen.getByText('Ingest jobs drive source status automatically.')).toBeInTheDocument()
+    expect(
+      screen.getByText('Use the job controls below for normal pipeline progress; only use source controls as a manual override.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Apply manual source override' })).toBeInTheDocument()
   })
 
   it('offers source status transitions and updates the source', async () => {
@@ -121,7 +126,7 @@ describe('App', () => {
 
     const statusSelect = await screen.findByLabelText('Update status for source src_123')
     await user.selectOptions(statusSelect, 'processing')
-    await user.click(screen.getByRole('button', { name: 'Apply source status' }))
+    await user.click(screen.getByRole('button', { name: 'Apply manual source override' }))
 
     await waitFor(() => {
       expect(mockApi.updateSourceStatus).toHaveBeenCalledWith('proj_123', 'src_123', 'processing')
@@ -132,6 +137,27 @@ describe('App', () => {
 
   it('offers valid job status transitions and updates the job', async () => {
     const user = userEvent.setup()
+    mockApi.getProject
+      .mockResolvedValueOnce(projectDetail)
+      .mockResolvedValueOnce({
+        ...projectDetail,
+        sources: [
+          {
+            ...sourceRecord,
+            status: 'processing',
+            updated_at: '2026-05-10T00:06:00Z',
+          },
+        ],
+        jobs: [
+          {
+            ...projectDetail.jobs[0],
+            status: 'running',
+            updated_at: '2026-05-10T00:06:00Z',
+          },
+          projectDetail.jobs[1],
+        ],
+      })
+
     render(<App />)
 
     const statusSelect = await screen.findByLabelText('Update status for job job_123')
@@ -143,5 +169,6 @@ describe('App', () => {
     })
 
     expect(await screen.findByText('Updated job job_123 to running')).toBeInTheDocument()
+    expect(await screen.findByText('Processing • work is in progress')).toBeInTheDocument()
   })
 })

@@ -233,6 +233,35 @@ class SQLiteStore:
                 """,
                 (status, job_id, project_id),
             )
+
+            if row["job_type"] == "ingest":
+                source_status_map = {
+                    "running": "processing",
+                    "completed": "completed",
+                    "failed": "failed",
+                }
+                next_source_status = source_status_map.get(status)
+                if next_source_status is not None:
+                    source_row = connection.execute(
+                        """
+                        SELECT status
+                        FROM sources
+                        WHERE id = ? AND project_id = ?
+                        """,
+                        (row["source_id"], project_id),
+                    ).fetchone()
+                    if source_row is not None:
+                        current_source_status = source_row["status"]
+                        if next_source_status in ALLOWED_SOURCE_STATUS_TRANSITIONS.get(current_source_status, set()):
+                            connection.execute(
+                                """
+                                UPDATE sources
+                                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE id = ? AND project_id = ?
+                                """,
+                                (next_source_status, row["source_id"], project_id),
+                            )
+
             updated_row = connection.execute(
                 """
                 SELECT id, project_id, source_id, job_type, status, created_at, updated_at

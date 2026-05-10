@@ -255,6 +255,17 @@ ul {
   color: #8ff0b5;
 }
 
+.pipeline-note {
+  border-left: 3px solid rgba(143, 183, 255, 0.55);
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.75rem;
+  background: rgba(143, 183, 255, 0.08);
+}
+
+.pipeline-note strong {
+  color: #dfe8fb;
+}
+
 a {
   color: #8fb7ff;
 }

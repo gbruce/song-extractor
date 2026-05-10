@@ -66,7 +66,7 @@ def test_project_source_and_job_workflow() -> None:
     assert len(jobs.json()) == 1
 
 
-def test_job_status_transition_updates_job_state_and_timestamp() -> None:
+def test_job_status_transition_updates_job_and_ingest_source_state() -> None:
     client = TestClient(app)
 
     project = client.post("/api/projects", json={"name": "Status Track"}).json()
@@ -79,15 +79,68 @@ def test_job_status_transition_updates_job_state_and_timestamp() -> None:
         json={"source_id": source["id"], "job_type": "ingest"},
     ).json()
 
+    update_job_running = client.patch(
+        f"/api/projects/{project['id']}/jobs/{job['id']}",
+        json={"status": "running"},
+    )
+
+    assert update_job_running.status_code == 200
+    running_job = update_job_running.json()
+    assert running_job["status"] == "running"
+    assert running_job["updated_at"] >= job["updated_at"]
+
+    project_after_running = client.get(f"/api/projects/{project['id']}").json()
+    assert project_after_running["sources"][0]["status"] == "processing"
+    assert project_after_running["sources"][0]["updated_at"] >= source["updated_at"]
+
+    update_job_completed = client.patch(
+        f"/api/projects/{project['id']}/jobs/{job['id']}",
+        json={"status": "completed"},
+    )
+
+    assert update_job_completed.status_code == 200
+    completed_job = update_job_completed.json()
+    assert completed_job["status"] == "completed"
+    assert completed_job["updated_at"] >= running_job["updated_at"]
+
+    project_after_completed = client.get(f"/api/projects/{project['id']}").json()
+    assert project_after_completed["sources"][0]["status"] == "completed"
+
+
+
+def test_non_ingest_job_transition_does_not_change_source_status() -> None:
+    client = TestClient(app)
+
+    project = client.post("/api/projects", json={"name": "Transcribe Track"}).json()
+    source = client.post(
+        f"/api/projects/{project['id']}/sources",
+        json={"kind": "youtube", "value": "https://youtube.com/watch?v=transcribe123"},
+    ).json()
+
+    source_completed = client.patch(
+        f"/api/projects/{project['id']}/sources/{source['id']}",
+        json={"status": "processing"},
+    )
+    assert source_completed.status_code == 200
+    source_completed = client.patch(
+        f"/api/projects/{project['id']}/sources/{source['id']}",
+        json={"status": "completed"},
+    )
+    assert source_completed.status_code == 200
+
+    job = client.post(
+        f"/api/projects/{project['id']}/jobs",
+        json={"source_id": source["id"], "job_type": "transcribe"},
+    ).json()
+
     update_job = client.patch(
         f"/api/projects/{project['id']}/jobs/{job['id']}",
         json={"status": "running"},
     )
 
     assert update_job.status_code == 200
-    updated_job = update_job.json()
-    assert updated_job["status"] == "running"
-    assert updated_job["updated_at"] >= job["updated_at"]
+    project_detail = client.get(f"/api/projects/{project['id']}").json()
+    assert project_detail["sources"][0]["status"] == "completed"
 
 
 
