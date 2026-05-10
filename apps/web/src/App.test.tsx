@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { api } from './api'
-import type { ProjectDetail, ProjectSummary } from './types'
+import type { ProjectDetail, ProjectSummary, SourceRecord } from './types'
 
 vi.mock('./api', () => ({
   api: {
@@ -14,6 +14,7 @@ vi.mock('./api', () => ({
     getProject: vi.fn(),
     createSource: vi.fn(),
     createJob: vi.fn(),
+    updateSourceStatus: vi.fn(),
     updateJobStatus: vi.fn(),
   },
 }))
@@ -29,19 +30,19 @@ const projectSummary: ProjectSummary = {
   job_count: 1,
 }
 
+const sourceRecord: SourceRecord = {
+  id: 'src_123',
+  project_id: 'proj_123',
+  kind: 'youtube',
+  value: 'https://youtube.com/watch?v=demo123',
+  status: 'submitted',
+  created_at: '2026-05-10T00:01:00Z',
+  updated_at: '2026-05-10T00:02:00Z',
+}
+
 const projectDetail: ProjectDetail = {
   ...projectSummary,
-  sources: [
-    {
-      id: 'src_123',
-      project_id: 'proj_123',
-      kind: 'youtube',
-      value: 'https://youtube.com/watch?v=demo123',
-      status: 'submitted',
-      created_at: '2026-05-10T00:01:00Z',
-      updated_at: '2026-05-10T00:02:00Z',
-    },
-  ],
+  sources: [sourceRecord],
   jobs: [
     {
       id: 'job_123',
@@ -70,8 +71,13 @@ describe('App', () => {
     mockApi.listProjects.mockResolvedValue([projectSummary])
     mockApi.getProject.mockResolvedValue(projectDetail)
     mockApi.createProject.mockResolvedValue(projectSummary)
-    mockApi.createSource.mockResolvedValue(projectDetail.sources[0])
+    mockApi.createSource.mockResolvedValue(sourceRecord)
     mockApi.createJob.mockResolvedValue(projectDetail.jobs[0])
+    mockApi.updateSourceStatus.mockResolvedValue({
+      ...sourceRecord,
+      status: 'processing',
+      updated_at: '2026-05-10T00:06:30Z',
+    })
     mockApi.updateJobStatus.mockResolvedValue({
       ...projectDetail.jobs[0],
       status: 'running',
@@ -107,6 +113,21 @@ describe('App', () => {
     expect(screen.getByText('2 linked jobs')).toBeInTheDocument()
     expect(screen.getByText('1 active • 1 done • 0 failed')).toBeInTheDocument()
     expect(screen.getByText('Latest job update: 2026-05-10T00:09:00Z')).toBeInTheDocument()
+  })
+
+  it('offers source status transitions and updates the source', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const statusSelect = await screen.findByLabelText('Update status for source src_123')
+    await user.selectOptions(statusSelect, 'processing')
+    await user.click(screen.getByRole('button', { name: 'Apply source status' }))
+
+    await waitFor(() => {
+      expect(mockApi.updateSourceStatus).toHaveBeenCalledWith('proj_123', 'src_123', 'processing')
+    })
+
+    expect(await screen.findByText('Updated source src_123 to processing')).toBeInTheDocument()
   })
 
   it('offers valid job status transitions and updates the job', async () => {

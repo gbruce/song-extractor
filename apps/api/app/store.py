@@ -7,6 +7,12 @@ from uuid import uuid4
 from app.db import bootstrap_database
 
 TERMINAL_JOB_STATUSES = {"completed", "failed"}
+ALLOWED_SOURCE_STATUS_TRANSITIONS = {
+    "submitted": {"processing", "failed"},
+    "processing": {"completed", "failed"},
+    "completed": set(),
+    "failed": set(),
+}
 ALLOWED_JOB_STATUS_TRANSITIONS = {
     "queued": {"running", "failed"},
     "running": {"completed", "failed"},
@@ -124,6 +130,41 @@ class SQLiteStore:
                 (source_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def update_source_status(self, project_id: str, source_id: str, status: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, project_id, kind, value, status, created_at, updated_at
+                FROM sources
+                WHERE id = ? AND project_id = ?
+                """,
+                (source_id, project_id),
+            ).fetchone()
+            if row is None:
+                return None
+
+            current_status = row["status"]
+            if status not in ALLOWED_SOURCE_STATUS_TRANSITIONS.get(current_status, set()):
+                raise ValueError("Invalid source status transition")
+
+            connection.execute(
+                """
+                UPDATE sources
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND project_id = ?
+                """,
+                (status, source_id, project_id),
+            )
+            updated_row = connection.execute(
+                """
+                SELECT id, project_id, kind, value, status, created_at, updated_at
+                FROM sources
+                WHERE id = ? AND project_id = ?
+                """,
+                (source_id, project_id),
+            ).fetchone()
+        return dict(updated_row) if updated_row else None
 
     def list_jobs(self, project_id: str) -> list[dict[str, str]] | None:
         if self._project_summary(project_id) is None:

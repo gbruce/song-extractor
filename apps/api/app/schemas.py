@@ -10,6 +10,10 @@ class SourceCreate(BaseModel):
     value: str = Field(min_length=1, max_length=2000)
 
 
+class SourceStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(submitted|processing|completed|failed)$")
+
+
 class JobCreate(BaseModel):
     source_id: str = Field(min_length=1, max_length=200)
     job_type: str = Field(pattern="^(ingest|transcribe|separate)$")

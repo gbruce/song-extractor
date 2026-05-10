@@ -12,7 +12,7 @@ export type SourceRecord = {
   project_id: string
   kind: 'youtube' | 'upload' | 'local_file'
   value: string
-  status: string
+  status: 'submitted' | 'processing' | 'completed' | 'failed'
   created_at: string
   updated_at: string
 }

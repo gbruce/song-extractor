@@ -41,6 +41,16 @@ export const api = {
       body: JSON.stringify({ kind, value }),
     })
   },
+  updateSourceStatus(
+    projectId: string,
+    sourceId: string,
+    status: SourceRecord['status'],
+  ): Promise<SourceRecord> {
+    return request<SourceRecord>(`/api/projects/${projectId}/sources/${sourceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    })
+  },
   createJob(projectId: string, sourceId: string, jobType: JobRecord['job_type']): Promise<JobRecord> {
     return request<JobRecord>(`/api/projects/${projectId}/jobs`, {
       method: 'POST',

@@ -12,6 +12,13 @@ const allowedNextStatuses: Record<JobRecord['status'], JobRecord['status'][]> = 
   failed: [],
 }
 
+const allowedNextSourceStatuses: Record<SourceRecord['status'], SourceRecord['status'][]> = {
+  submitted: ['processing', 'failed'],
+  processing: ['completed', 'failed'],
+  completed: [],
+  failed: [],
+}
+
 const jobStatusMeta: Record<
   JobRecord['status'],
   {
@@ -42,7 +49,7 @@ const jobStatusMeta: Record<
   },
 }
 
-function getSourceStatusMeta(status: string) {
+function getSourceStatusMeta(status: SourceRecord['status']) {
   switch (status) {
     case 'submitted':
       return {
@@ -50,11 +57,23 @@ function getSourceStatusMeta(status: string) {
         hint: 'awaiting processing',
         tone: 'submitted',
       } as const
-    default:
+    case 'processing':
       return {
-        label: status.charAt(0).toUpperCase() + status.slice(1),
-        hint: 'status reported by backend',
-        tone: 'submitted',
+        label: 'Processing',
+        hint: 'work is in progress',
+        tone: 'running',
+      } as const
+    case 'completed':
+      return {
+        label: 'Completed',
+        hint: 'ready for downstream steps',
+        tone: 'completed',
+      } as const
+    case 'failed':
+      return {
+        label: 'Failed',
+        hint: 'needs attention',
+        tone: 'failed',
       } as const
   }
 }
@@ -73,6 +92,9 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [sourceStatusSelections, setSourceStatusSelections] = useState<
+    Record<string, SourceRecord['status']>
+  >({})
   const [jobStatusSelections, setJobStatusSelections] = useState<Record<string, JobRecord['status']>>({})
 
   const selectedProject = useMemo(
@@ -100,6 +122,13 @@ function App() {
     if (nextSelectedId) {
       const detail = await api.getProject(nextSelectedId)
       setProjectDetail(detail)
+      setSourceStatusSelections(
+        Object.fromEntries(
+          detail.sources
+            .filter((source) => allowedNextSourceStatuses[source.status].length > 0)
+            .map((source) => [source.id, allowedNextSourceStatuses[source.status][0]]),
+        ) as Record<string, SourceRecord['status']>,
+      )
       setJobStatusSelections(
         Object.fromEntries(
           detail.jobs
@@ -109,6 +138,7 @@ function App() {
       )
     } else {
       setProjectDetail(null)
+      setSourceStatusSelections({})
       setJobStatusSelections({})
     }
   }
@@ -149,6 +179,13 @@ function App() {
     try {
       const detail = await api.getProject(projectId)
       setProjectDetail(detail)
+      setSourceStatusSelections(
+        Object.fromEntries(
+          detail.sources
+            .filter((source) => allowedNextSourceStatuses[source.status].length > 0)
+            .map((source) => [source.id, allowedNextSourceStatuses[source.status][0]]),
+        ) as Record<string, SourceRecord['status']>,
+      )
       setJobStatusSelections(
         Object.fromEntries(
           detail.jobs
@@ -179,6 +216,27 @@ function App() {
       setMessage(`Submitted ${source.kind} source for ingest`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit source')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleUpdateSourceStatus(sourceId: string) {
+    if (!selectedProjectId) return
+
+    const nextStatus = sourceStatusSelections[sourceId]
+    if (!nextStatus) return
+
+    setLoading(true)
+    setError('')
+    setMessage('')
+
+    try {
+      const updatedSource = await api.updateSourceStatus(selectedProjectId, sourceId, nextStatus)
+      await loadProjects(selectedProjectId)
+      setMessage(`Updated source ${updatedSource.id} to ${updatedSource.status}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update source status')
     } finally {
       setLoading(false)
     }
@@ -358,6 +416,9 @@ function App() {
                   <ul className="list compact">
                     {projectDetail.sources.map((source) => {
                       const sourceStatusMeta = getSourceStatusMeta(source.status)
+                      const nextSourceStatuses = allowedNextSourceStatuses[source.status]
+                      const selectedSourceStatus =
+                        sourceStatusSelections[source.id] ?? nextSourceStatuses[0]
                       const sourceJobs = projectDetail.jobs.filter((job) => job.source_id === source.id)
                       const sourceJobSummary = {
                         total: sourceJobs.length,
@@ -398,6 +459,43 @@ function App() {
                               </span>
                             ) : (
                               <span className="muted">No linked jobs yet.</span>
+                            )}
+                            {nextSourceStatuses.length > 0 ? (
+                              <>
+                                <span className="muted">
+                                  Next source transitions: {nextSourceStatuses.join(', ')}
+                                </span>
+                                <div className="inline-actions">
+                                  <label className="stack-xs grow">
+                                    <span>Update status for source {source.id}</span>
+                                    <select
+                                      aria-label={`Update status for source ${source.id}`}
+                                      value={selectedSourceStatus}
+                                      onChange={(event) =>
+                                        setSourceStatusSelections((current) => ({
+                                          ...current,
+                                          [source.id]: event.target.value as SourceRecord['status'],
+                                        }))
+                                      }
+                                    >
+                                      {nextSourceStatuses.map((statusOption) => (
+                                        <option key={statusOption} value={statusOption}>
+                                          {statusOption}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <button
+                                    type="button"
+                                    disabled={loading || !selectedSourceStatus}
+                                    onClick={() => handleUpdateSourceStatus(source.id)}
+                                  >
+                                    Apply source status
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <span className="muted">No further source transitions available.</span>
                             )}
                           </div>
                         </li>

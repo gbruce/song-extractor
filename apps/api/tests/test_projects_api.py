@@ -91,6 +91,46 @@ def test_job_status_transition_updates_job_state_and_timestamp() -> None:
 
 
 
+def test_source_status_transition_updates_source_state_and_timestamp() -> None:
+    client = TestClient(app)
+
+    project = client.post("/api/projects", json={"name": "Source Status Track"}).json()
+    source = client.post(
+        f"/api/projects/{project['id']}/sources",
+        json={"kind": "youtube", "value": "https://youtube.com/watch?v=source-status"},
+    ).json()
+
+    update_source = client.patch(
+        f"/api/projects/{project['id']}/sources/{source['id']}",
+        json={"status": "processing"},
+    )
+
+    assert update_source.status_code == 200
+    updated_source = update_source.json()
+    assert updated_source["status"] == "processing"
+    assert updated_source["updated_at"] >= source["updated_at"]
+
+
+
+def test_invalid_source_status_transition_returns_409() -> None:
+    client = TestClient(app)
+
+    project = client.post("/api/projects", json={"name": "Invalid Source Status Track"}).json()
+    source = client.post(
+        f"/api/projects/{project['id']}/sources",
+        json={"kind": "youtube", "value": "https://youtube.com/watch?v=invalid-source"},
+    ).json()
+
+    update_source = client.patch(
+        f"/api/projects/{project['id']}/sources/{source['id']}",
+        json={"status": "completed"},
+    )
+
+    assert update_source.status_code == 409
+    assert update_source.json()["detail"] == "Invalid source status transition"
+
+
+
 def test_invalid_job_status_transition_returns_409() -> None:
     client = TestClient(app)
 

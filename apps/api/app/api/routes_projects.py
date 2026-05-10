@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.schemas import JobCreate, JobStatusUpdate, ProjectCreate, SourceCreate
+from app.schemas import JobCreate, JobStatusUpdate, ProjectCreate, SourceCreate, SourceStatusUpdate
 from app.store import SQLiteStore
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -33,6 +33,34 @@ def create_source(project_id: str, payload: SourceCreate, request: Request) -> d
     source = get_store(request).add_source(project_id=project_id, kind=payload.kind, value=payload.value)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return source
+
+
+@router.patch("/{project_id}/sources/{source_id}")
+def update_source_status(
+    project_id: str,
+    source_id: str,
+    payload: SourceStatusUpdate,
+    request: Request,
+) -> dict[str, str]:
+    try:
+        source = get_store(request).update_source_status(
+            project_id=project_id,
+            source_id=source_id,
+            status=payload.status,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project or source not found",
+        )
+
     return source
 
 
