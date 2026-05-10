@@ -12,6 +12,36 @@ const allowedNextStatuses: Record<JobRecord['status'], JobRecord['status'][]> = 
   failed: [],
 }
 
+const jobStatusMeta: Record<
+  JobRecord['status'],
+  {
+    label: string
+    hint: string
+    tone: 'queued' | 'running' | 'completed' | 'failed'
+  }
+> = {
+  queued: {
+    label: 'Queued',
+    hint: 'waiting to start',
+    tone: 'queued',
+  },
+  running: {
+    label: 'Running',
+    hint: 'currently processing',
+    tone: 'running',
+  },
+  completed: {
+    label: 'Completed',
+    hint: 'no further action',
+    tone: 'completed',
+  },
+  failed: {
+    label: 'Failed',
+    hint: 'needs attention',
+    tone: 'failed',
+  },
+}
+
 function formatTimestamp(label: string, value: string) {
   return `${label}: ${value}`
 }
@@ -32,6 +62,16 @@ function App() {
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   )
+
+  const jobLifecycleSummary = useMemo(() => {
+    const jobs = projectDetail?.jobs ?? []
+    return {
+      total: jobs.length,
+      active: jobs.filter((job) => job.status === 'queued' || job.status === 'running').length,
+      done: jobs.filter((job) => job.status === 'completed').length,
+      failed: jobs.filter((job) => job.status === 'failed').length,
+    }
+  }, [projectDetail])
 
   async function loadProjects(preferredProjectId?: string) {
     const data = await api.listProjects()
@@ -317,6 +357,14 @@ function App() {
 
               <div className="stack-sm">
                 <h3>Queued jobs</h3>
+                <div className="summary-row">
+                  <span className="summary-pill">{jobLifecycleSummary.total} jobs total</span>
+                  <span className="summary-pill summary-pill-active">{jobLifecycleSummary.active} active</span>
+                  <span className="summary-pill summary-pill-done">{jobLifecycleSummary.done} done</span>
+                  {jobLifecycleSummary.failed > 0 ? (
+                    <span className="summary-pill summary-pill-failed">{jobLifecycleSummary.failed} failed</span>
+                  ) : null}
+                </div>
                 {projectDetail.jobs.length === 0 ? (
                   <p className="muted">No jobs queued yet.</p>
                 ) : (
@@ -324,49 +372,59 @@ function App() {
                     {projectDetail.jobs.map((job) => {
                       const nextStatuses = allowedNextStatuses[job.status]
                       const selectedStatus = jobStatusSelections[job.id] ?? nextStatuses[0]
+                      const statusMeta = jobStatusMeta[job.status]
 
                       return (
                         <li key={job.id} className="list-row detail-card">
                           <div className="stack-xs grow">
-                            <span>
-                              <strong>{job.job_type}</strong> — source {job.source_id}
-                            </span>
+                            <div className="job-header-row">
+                              <span>
+                                <strong>{job.job_type}</strong> — source {job.source_id}
+                              </span>
+                              <span className={`status-badge status-${statusMeta.tone}`}>
+                                {statusMeta.label} • {statusMeta.hint}
+                              </span>
+                            </div>
                             <span>{formatTimestamp('Queued at', job.created_at)}</span>
                             <span>{formatTimestamp('Updated', job.updated_at)}</span>
                             {nextStatuses.length > 0 ? (
-                              <div className="inline-actions">
-                                <label className="stack-xs grow">
-                                  <span>Update status for job {job.id}</span>
-                                  <select
-                                    aria-label={`Update status for job ${job.id}`}
-                                    value={selectedStatus}
-                                    onChange={(event) =>
-                                      setJobStatusSelections((current) => ({
-                                        ...current,
-                                        [job.id]: event.target.value as JobRecord['status'],
-                                      }))
-                                    }
+                              <>
+                                <span className="muted">
+                                  Next transitions: {nextStatuses.join(', ')}
+                                </span>
+                                <div className="inline-actions">
+                                  <label className="stack-xs grow">
+                                    <span>Update status for job {job.id}</span>
+                                    <select
+                                      aria-label={`Update status for job ${job.id}`}
+                                      value={selectedStatus}
+                                      onChange={(event) =>
+                                        setJobStatusSelections((current) => ({
+                                          ...current,
+                                          [job.id]: event.target.value as JobRecord['status'],
+                                        }))
+                                      }
+                                    >
+                                      {nextStatuses.map((statusOption) => (
+                                        <option key={statusOption} value={statusOption}>
+                                          {statusOption}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <button
+                                    type="button"
+                                    disabled={loading || !selectedStatus}
+                                    onClick={() => handleUpdateJobStatus(job.id)}
                                   >
-                                    {nextStatuses.map((statusOption) => (
-                                      <option key={statusOption} value={statusOption}>
-                                        {statusOption}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <button
-                                  type="button"
-                                  disabled={loading || !selectedStatus}
-                                  onClick={() => handleUpdateJobStatus(job.id)}
-                                >
-                                  Apply status
-                                </button>
-                              </div>
+                                    Apply status
+                                  </button>
+                                </div>
+                              </>
                             ) : (
                               <span className="muted">No further transitions available.</span>
                             )}
                           </div>
-                          <span>{job.status}</span>
                         </li>
                       )
                     })}

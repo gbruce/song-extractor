@@ -52,6 +52,15 @@ const projectDetail: ProjectDetail = {
       created_at: '2026-05-10T00:03:00Z',
       updated_at: '2026-05-10T00:04:00Z',
     },
+    {
+      id: 'job_456',
+      project_id: 'proj_123',
+      source_id: 'src_123',
+      job_type: 'transcribe',
+      status: 'completed',
+      created_at: '2026-05-10T00:07:00Z',
+      updated_at: '2026-05-10T00:09:00Z',
+    },
   ],
 }
 
@@ -77,6 +86,18 @@ describe('App', () => {
     expect(screen.getAllByText('Updated: 2026-05-10T00:05:00Z')).toHaveLength(2)
     expect(screen.getByText('Submitted: 2026-05-10T00:01:00Z')).toBeInTheDocument()
     expect(screen.getByText('Queued at: 2026-05-10T00:03:00Z')).toBeInTheDocument()
+  })
+
+  it('renders lifecycle badges and guidance for active and terminal jobs', async () => {
+    render(<App />)
+
+    expect(await screen.findByText('2 jobs total')).toBeInTheDocument()
+    expect(screen.getByText('1 active')).toBeInTheDocument()
+    expect(screen.getByText('1 done')).toBeInTheDocument()
+    expect(screen.getByText('Queued • waiting to start')).toBeInTheDocument()
+    expect(screen.getByText('Completed • no further action')).toBeInTheDocument()
+    expect(screen.getByText('Next transitions: running, failed')).toBeInTheDocument()
+    expect(screen.getByText('No further transitions available.')).toBeInTheDocument()
   })
 
   it('offers valid job status transitions and updates the job', async () => {
