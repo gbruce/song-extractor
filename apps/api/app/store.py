@@ -1,126 +1,206 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from threading import Lock
+import sqlite3
+from pathlib import Path
 from uuid import uuid4
 
 
-@dataclass
-class SourceRecord:
-    id: str
-    project_id: str
-    kind: str
-    value: str
-    status: str
+class SQLiteStore:
+    def __init__(self, database_path: Path) -> None:
+        self.database_path = Path(database_path)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
 
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
 
-@dataclass
-class JobRecord:
-    id: str
-    project_id: str
-    source_id: str
-    job_type: str
-    status: str
+    def _initialize(self) -> None:
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL
+                );
 
+                CREATE TABLE IF NOT EXISTS sources (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
 
-@dataclass
-class ProjectRecord:
-    id: str
-    name: str
-
-
-class InMemoryStore:
-    def __init__(self) -> None:
-        self._lock = Lock()
-        self.reset()
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                    FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+                );
+                """
+            )
 
     def reset(self) -> None:
-        with self._lock:
-            self.projects: dict[str, ProjectRecord] = {}
-            self.sources: dict[str, SourceRecord] = {}
-            self.jobs: dict[str, JobRecord] = {}
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                DELETE FROM jobs;
+                DELETE FROM sources;
+                DELETE FROM projects;
+                """
+            )
 
     def list_projects(self) -> list[dict[str, object]]:
-        with self._lock:
-            return [self._project_summary(project_id) for project_id in self.projects]
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    p.id,
+                    p.name,
+                    COUNT(DISTINCT s.id) AS source_count,
+                    COUNT(DISTINCT j.id) AS job_count
+                FROM projects p
+                LEFT JOIN sources s ON s.project_id = p.id
+                LEFT JOIN jobs j ON j.project_id = p.id
+                GROUP BY p.id, p.name
+                ORDER BY p.rowid DESC
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def create_project(self, name: str) -> dict[str, object]:
-        with self._lock:
-            project_id = f"proj_{uuid4().hex[:10]}"
-            self.projects[project_id] = ProjectRecord(id=project_id, name=name)
-            return self._project_summary(project_id)
+        project_id = f"proj_{uuid4().hex[:10]}"
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO projects (id, name) VALUES (?, ?)",
+                (project_id, name),
+            )
+        return self._project_summary(project_id)
 
     def get_project_detail(self, project_id: str) -> dict[str, object] | None:
-        with self._lock:
-            if project_id not in self.projects:
-                return None
+        project = self._project_summary(project_id)
+        if project is None:
+            return None
 
-            project = self.projects[project_id]
+        with self._connect() as connection:
             sources = [
-                asdict(source)
-                for source in self.sources.values()
-                if source.project_id == project_id
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT id, project_id, kind, value, status
+                    FROM sources
+                    WHERE project_id = ?
+                    ORDER BY rowid ASC
+                    """,
+                    (project_id,),
+                ).fetchall()
             ]
-            jobs = [asdict(job) for job in self.jobs.values() if job.project_id == project_id]
-            return {
-                **asdict(project),
-                "source_count": len(sources),
-                "job_count": len(jobs),
-                "sources": sources,
-                "jobs": jobs,
-            }
+            jobs = [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT id, project_id, source_id, job_type, status
+                    FROM jobs
+                    WHERE project_id = ?
+                    ORDER BY rowid ASC
+                    """,
+                    (project_id,),
+                ).fetchall()
+            ]
 
-    def add_source(self, project_id: str, kind: str, value: str) -> dict[str, str] | None:
-        with self._lock:
-            if project_id not in self.projects:
-                return None
-            source = SourceRecord(
-                id=f"src_{uuid4().hex[:10]}",
-                project_id=project_id,
-                kind=kind,
-                value=value,
-                status="submitted",
-            )
-            self.sources[source.id] = source
-            return asdict(source)
-
-    def list_jobs(self, project_id: str) -> list[dict[str, str]] | None:
-        with self._lock:
-            if project_id not in self.projects:
-                return None
-            return [asdict(job) for job in self.jobs.values() if job.project_id == project_id]
-
-    def add_job(self, project_id: str, source_id: str, job_type: str) -> dict[str, str] | None:
-        with self._lock:
-            if project_id not in self.projects or source_id not in self.sources:
-                return None
-            source = self.sources[source_id]
-            if source.project_id != project_id:
-                return None
-            job = JobRecord(
-                id=f"job_{uuid4().hex[:10]}",
-                project_id=project_id,
-                source_id=source_id,
-                job_type=job_type,
-                status="queued",
-            )
-            self.jobs[job.id] = job
-            return asdict(job)
-
-    def _project_summary(self, project_id: str) -> dict[str, object]:
-        project = self.projects[project_id]
-        source_count = sum(1 for source in self.sources.values() if source.project_id == project_id)
-        job_count = sum(1 for job in self.jobs.values() if job.project_id == project_id)
         return {
-            "id": project.id,
-            "name": project.name,
-            "source_count": source_count,
-            "job_count": job_count,
+            **project,
+            "sources": sources,
+            "jobs": jobs,
         }
 
+    def add_source(self, project_id: str, kind: str, value: str) -> dict[str, str] | None:
+        if self._project_summary(project_id) is None:
+            return None
 
-store = InMemoryStore()
+        source_id = f"src_{uuid4().hex[:10]}"
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO sources (id, project_id, kind, value, status)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (source_id, project_id, kind, value, "submitted"),
+            )
+            row = connection.execute(
+                "SELECT id, project_id, kind, value, status FROM sources WHERE id = ?",
+                (source_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_jobs(self, project_id: str) -> list[dict[str, str]] | None:
+        if self._project_summary(project_id) is None:
+            return None
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, project_id, source_id, job_type, status
+                FROM jobs
+                WHERE project_id = ?
+                ORDER BY rowid ASC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_job(self, project_id: str, source_id: str, job_type: str) -> dict[str, str] | None:
+        if self._project_summary(project_id) is None:
+            return None
+
+        with self._connect() as connection:
+            source = connection.execute(
+                "SELECT id, project_id FROM sources WHERE id = ?",
+                (source_id,),
+            ).fetchone()
+            if source is None or source["project_id"] != project_id:
+                return None
+
+            job_id = f"job_{uuid4().hex[:10]}"
+            connection.execute(
+                """
+                INSERT INTO jobs (id, project_id, source_id, job_type, status)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (job_id, project_id, source_id, job_type, "queued"),
+            )
+            row = connection.execute(
+                "SELECT id, project_id, source_id, job_type, status FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def _project_summary(self, project_id: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    p.id,
+                    p.name,
+                    COUNT(DISTINCT s.id) AS source_count,
+                    COUNT(DISTINCT j.id) AS job_count
+                FROM projects p
+                LEFT JOIN sources s ON s.project_id = p.id
+                LEFT JOIN jobs j ON j.project_id = p.id
+                WHERE p.id = ?
+                GROUP BY p.id, p.name
+                """,
+                (project_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
 
-def reset_store() -> None:
+def reset_store(store: SQLiteStore) -> None:
     store.reset()

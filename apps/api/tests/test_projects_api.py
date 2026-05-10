@@ -1,11 +1,14 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.main import app
 from app.store import reset_store
 
 
 def setup_function() -> None:
-    reset_store()
+    reset_store(app.state.store)
 
 
 def test_project_source_and_job_workflow() -> None:
@@ -55,7 +58,6 @@ def test_project_source_and_job_workflow() -> None:
     assert len(jobs.json()) == 1
 
 
-
 def test_creating_source_for_unknown_project_returns_404() -> None:
     client = TestClient(app)
 
@@ -66,3 +68,13 @@ def test_creating_source_for_unknown_project_returns_404() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Project not found"
+
+
+def test_store_uses_sqlite_database_file() -> None:
+    settings = get_settings()
+    database_path = Path(app.state.store.database_path)
+
+    assert database_path.name == "songcraft.db"
+    assert database_path.suffix == ".db"
+    assert database_path == settings.sqlite_path
+    assert database_path.exists()
