@@ -1,9 +1,20 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api } from './api'
-import type { ProjectDetail, ProjectSummary, SourceRecord } from './types'
+import type { JobRecord, ProjectDetail, ProjectSummary, SourceRecord } from './types'
 
 const apiBaseUrl = api.getApiBaseUrl()
+
+const allowedNextStatuses: Record<JobRecord['status'], JobRecord['status'][]> = {
+  queued: ['running', 'failed'],
+  running: ['completed', 'failed'],
+  completed: [],
+  failed: [],
+}
+
+function formatTimestamp(label: string, value: string) {
+  return `${label}: ${value}`
+}
 
 function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -15,6 +26,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [jobStatusSelections, setJobStatusSelections] = useState<Record<string, JobRecord['status']>>({})
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -25,14 +37,22 @@ function App() {
     const data = await api.listProjects()
     setProjects(data)
 
-    const nextSelectedId = preferredProjectId ?? selectedProjectId ?? data[0]?.id ?? ''
+    const nextSelectedId = preferredProjectId || selectedProjectId || data[0]?.id || ''
     setSelectedProjectId(nextSelectedId)
 
     if (nextSelectedId) {
       const detail = await api.getProject(nextSelectedId)
       setProjectDetail(detail)
+      setJobStatusSelections(
+        Object.fromEntries(
+          detail.jobs
+            .filter((job) => allowedNextStatuses[job.status].length > 0)
+            .map((job) => [job.id, allowedNextStatuses[job.status][0]]),
+        ) as Record<string, JobRecord['status']>,
+      )
     } else {
       setProjectDetail(null)
+      setJobStatusSelections({})
     }
   }
 
@@ -72,6 +92,13 @@ function App() {
     try {
       const detail = await api.getProject(projectId)
       setProjectDetail(detail)
+      setJobStatusSelections(
+        Object.fromEntries(
+          detail.jobs
+            .filter((job) => allowedNextStatuses[job.status].length > 0)
+            .map((job) => [job.id, allowedNextStatuses[job.status][0]]),
+        ) as Record<string, JobRecord['status']>,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project detail')
     } finally {
@@ -95,6 +122,27 @@ function App() {
       setMessage(`Submitted ${source.kind} source for ingest`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit source')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleUpdateJobStatus(jobId: string) {
+    if (!selectedProjectId) return
+
+    const nextStatus = jobStatusSelections[jobId]
+    if (!nextStatus) return
+
+    setLoading(true)
+    setError('')
+    setMessage('')
+
+    try {
+      const updatedJob = await api.updateJobStatus(selectedProjectId, jobId, nextStatus)
+      await loadProjects(selectedProjectId)
+      setMessage(`Updated job ${updatedJob.id} to ${updatedJob.status}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update job status')
     } finally {
       setLoading(false)
     }
@@ -145,7 +193,11 @@ function App() {
                         onClick={() => handleSelectProject(project.id)}
                         type="button"
                       >
-                        <strong>{project.name}</strong>
+                        <span className="stack-xs">
+                          <strong>{project.name}</strong>
+                          <span>{formatTimestamp('Created', project.created_at)}</span>
+                          <span>{formatTimestamp('Updated', project.updated_at)}</span>
+                        </span>
                         <span>
                           {project.source_count} sources • {project.job_count} jobs
                         </span>
@@ -219,6 +271,8 @@ function App() {
               <div className="stack-sm">
                 <h3>{projectDetail.name}</h3>
                 <p className="muted">Project ID: {projectDetail.id}</p>
+                <p>{formatTimestamp('Created', projectDetail.created_at)}</p>
+                <p>{formatTimestamp('Updated', projectDetail.updated_at)}</p>
                 <p>
                   Sources: {projectDetail.source_count} • Jobs: {projectDetail.job_count}
                 </p>
@@ -246,10 +300,14 @@ function App() {
                 ) : (
                   <ul className="list compact">
                     {projectDetail.sources.map((source) => (
-                      <li key={source.id} className="list-row">
-                        <span>
-                          <strong>{source.kind}</strong> — {source.value}
-                        </span>
+                      <li key={source.id} className="list-row detail-card">
+                        <div className="stack-xs">
+                          <span>
+                            <strong>{source.kind}</strong> — {source.value}
+                          </span>
+                          <span>{formatTimestamp('Submitted', source.created_at)}</span>
+                          <span>{formatTimestamp('Updated', source.updated_at)}</span>
+                        </div>
                         <span>{source.status}</span>
                       </li>
                     ))}
@@ -263,14 +321,55 @@ function App() {
                   <p className="muted">No jobs queued yet.</p>
                 ) : (
                   <ul className="list compact">
-                    {projectDetail.jobs.map((job) => (
-                      <li key={job.id} className="list-row">
-                        <span>
-                          <strong>{job.job_type}</strong> — source {job.source_id}
-                        </span>
-                        <span>{job.status}</span>
-                      </li>
-                    ))}
+                    {projectDetail.jobs.map((job) => {
+                      const nextStatuses = allowedNextStatuses[job.status]
+                      const selectedStatus = jobStatusSelections[job.id] ?? nextStatuses[0]
+
+                      return (
+                        <li key={job.id} className="list-row detail-card">
+                          <div className="stack-xs grow">
+                            <span>
+                              <strong>{job.job_type}</strong> — source {job.source_id}
+                            </span>
+                            <span>{formatTimestamp('Queued at', job.created_at)}</span>
+                            <span>{formatTimestamp('Updated', job.updated_at)}</span>
+                            {nextStatuses.length > 0 ? (
+                              <div className="inline-actions">
+                                <label className="stack-xs grow">
+                                  <span>Update status for job {job.id}</span>
+                                  <select
+                                    aria-label={`Update status for job ${job.id}`}
+                                    value={selectedStatus}
+                                    onChange={(event) =>
+                                      setJobStatusSelections((current) => ({
+                                        ...current,
+                                        [job.id]: event.target.value as JobRecord['status'],
+                                      }))
+                                    }
+                                  >
+                                    {nextStatuses.map((statusOption) => (
+                                      <option key={statusOption} value={statusOption}>
+                                        {statusOption}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <button
+                                  type="button"
+                                  disabled={loading || !selectedStatus}
+                                  onClick={() => handleUpdateJobStatus(job.id)}
+                                >
+                                  Apply status
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="muted">No further transitions available.</span>
+                            )}
+                          </div>
+                          <span>{job.status}</span>
+                        </li>
+                      )
+                    })}
                   </ul>
                 )}
               </div>
