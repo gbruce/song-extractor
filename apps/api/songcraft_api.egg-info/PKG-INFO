@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: songcraft-api
+Version: 0.1.0
+Summary: FastAPI backend scaffold for songcraft
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi<1.0,>=0.115
+Requires-Dist: uvicorn[standard]<1.0,>=0.30
+Requires-Dist: pydantic-settings<3.0,>=2.3
+Provides-Extra: dev
+Requires-Dist: httpx<1.0,>=0.27; extra == "dev"
+Requires-Dist: pytest<9.0,>=8.2; extra == "dev"
+
+# songcraft API
+
+Minimal FastAPI backend scaffold for the songcraft monorepo.
