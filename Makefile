@@ -3,7 +3,7 @@ SHELL := /bin/bash
 API_DIR := apps/api
 WEB_DIR := apps/web
 
-.PHONY: bootstrap install dev up down test test-api test-web ci
+.PHONY: bootstrap install dev up down test test-api test-web ci db-bootstrap
 
 bootstrap:
 	bash scripts/bootstrap.sh
@@ -30,5 +30,8 @@ test-api:
 
 test-web:
 	cd $(WEB_DIR) && npm run build
+
+db-bootstrap:
+	cd $(API_DIR) && . .venv/bin/activate && python -c "from app.config import get_settings; from app.db import bootstrap_database; s = get_settings(); bootstrap_database(s.sqlite_path); print(s.sqlite_path)"
 
 ci: test

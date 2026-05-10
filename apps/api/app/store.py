@@ -4,48 +4,20 @@ import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
+from app.db import bootstrap_database
+
 
 class SQLiteStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        bootstrap_database(self.database_path)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
-
-    def _initialize(self) -> None:
-        with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS projects (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS sources (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    source_id TEXT NOT NULL,
-                    job_type TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
-                );
-                """
-            )
 
     def reset(self) -> None:
         with self._connect() as connection:

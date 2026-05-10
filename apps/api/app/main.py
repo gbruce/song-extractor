@@ -3,9 +3,11 @@ from fastapi import FastAPI
 from app.api.routes_health import router as health_router
 from app.api.routes_projects import router as projects_router
 from app.config import get_settings
+from app.db import bootstrap_database
 from app.store import SQLiteStore
 
 settings = get_settings()
+bootstrap_database(settings.sqlite_path)
 app = FastAPI(title=settings.app_name)
 app.state.store = SQLiteStore(settings.sqlite_path)
 app.include_router(health_router, prefix="/api", tags=["health"])

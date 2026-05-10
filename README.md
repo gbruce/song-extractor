@@ -11,6 +11,7 @@ This repository is intentionally minimal, but it now includes the first real app
 - a bootstrap script for cross-machine setup
 - a devcontainer for editor-based onboarding
 - GitHub Actions CI for API tests and frontend build verification
+- SQLite persistence with schema bootstrap and migration tracking
 
 No heavy media, download, or processing features are implemented yet.
 
@@ -51,6 +52,7 @@ Choose one of these approaches:
 
 ```bash
 bash scripts/bootstrap.sh
+make db-bootstrap
 make test
 make dev
 ```
@@ -98,6 +100,7 @@ docker compose down
 
 ```bash
 bash scripts/bootstrap.sh
+make db-bootstrap
 ```
 
 ### Backend
@@ -126,6 +129,7 @@ From the repository root:
 ```bash
 make bootstrap
 make install
+make db-bootstrap
 make dev
 make up
 make down
@@ -143,7 +147,19 @@ make ci
 - `GET /api/projects/{project_id}/jobs`
 - `POST /api/projects/{project_id}/jobs`
 
-The current implementation uses an in-memory store so the UI can exercise a realistic app flow before persistent storage is added.
+The current implementation uses SQLite-backed local persistence so the UI can exercise a realistic app flow before heavier media processing is added.
+
+## Persistence and migrations
+
+- SQLite database path: `apps/api/data/songcraft.db`
+- Schema bootstrap module: `apps/api/app/db.py`
+- Migration tracking table: `schema_migrations`
+
+Current approach:
+- startup bootstraps the SQLite schema automatically
+- migrations are tracked by version
+- bootstrap is idempotent
+- `make db-bootstrap` can initialize the database manually
 
 ## Frontend status
 
@@ -166,4 +182,4 @@ See `.env.example` for the default variables used by Docker Compose and local de
 
 ## Current scope
 
-This is still scaffolding plus the first workflow layer. Actual YouTube downloading, audio extraction, stem separation, transcription, structure labeling, persistence, and exports are still to come.
+This is still scaffolding plus the first workflow layer. Actual YouTube downloading, audio extraction, stem separation, transcription, structure labeling, richer schema migrations, and exports are still to come.
