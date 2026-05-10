@@ -16,7 +16,7 @@ const allowedNextSourceStatuses: Record<SourceRecord['status'], SourceRecord['st
   submitted: ['processing', 'failed'],
   processing: ['completed', 'failed'],
   completed: [],
-  failed: [],
+  failed: ['completed'],
 }
 
 const jobStatusMeta: Record<

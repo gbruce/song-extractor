@@ -149,6 +149,45 @@ describe('App', () => {
     expect(await screen.findByText('Updated source src_123 to processing')).toBeInTheDocument()
   })
 
+  it('keeps manual source overrides available after ingest fails', async () => {
+    const user = userEvent.setup()
+    mockApi.getProject.mockResolvedValue({
+      ...projectDetail,
+      sources: [
+        {
+          ...sourceRecord,
+          status: 'failed',
+          updated_at: '2026-05-10T00:10:00Z',
+        },
+      ],
+      jobs: [
+        {
+          ...projectDetail.jobs[0],
+          status: 'failed',
+          updated_at: '2026-05-10T00:10:00Z',
+        },
+        projectDetail.jobs[1],
+      ],
+    })
+    mockApi.updateSourceStatus.mockResolvedValue({
+      ...sourceRecord,
+      status: 'completed',
+      updated_at: '2026-05-10T00:11:00Z',
+    })
+    render(<App />)
+
+    const statusSelect = await screen.findByLabelText('Update status for source src_123')
+    expect(screen.getByText('Next source transitions: completed')).toBeInTheDocument()
+    await user.selectOptions(statusSelect, 'completed')
+    await user.click(screen.getByRole('button', { name: 'Apply manual source override' }))
+
+    await waitFor(() => {
+      expect(mockApi.updateSourceStatus).toHaveBeenCalledWith('proj_123', 'src_123', 'completed')
+    })
+
+    expect(await screen.findByText('Updated source src_123 to completed')).toBeInTheDocument()
+  })
+
   it('offers valid job status transitions and updates the job', async () => {
     const user = userEvent.setup()
     mockApi.getProject

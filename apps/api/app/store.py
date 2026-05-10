@@ -11,7 +11,7 @@ ALLOWED_SOURCE_STATUS_TRANSITIONS = {
     "submitted": {"processing", "failed"},
     "processing": {"completed", "failed"},
     "completed": set(),
-    "failed": set(),
+    "failed": {"completed"},
 }
 ALLOWED_JOB_STATUS_TRANSITIONS = {
     "queued": {"running", "failed"},

@@ -184,6 +184,32 @@ def test_invalid_source_status_transition_returns_409() -> None:
 
 
 
+def test_failed_source_can_be_manually_recovered_to_completed() -> None:
+    client = TestClient(app)
+
+    project = client.post("/api/projects", json={"name": "Recover Failed Source"}).json()
+    source = client.post(
+        f"/api/projects/{project['id']}/sources",
+        json={"kind": "youtube", "value": "https://youtube.com/watch?v=recover-source"},
+    ).json()
+
+    failed_source = client.patch(
+        f"/api/projects/{project['id']}/sources/{source['id']}",
+        json={"status": "failed"},
+    )
+    assert failed_source.status_code == 200
+
+    recovered_source = client.patch(
+        f"/api/projects/{project['id']}/sources/{source['id']}",
+        json={"status": "completed"},
+    )
+
+    assert recovered_source.status_code == 200
+    assert recovered_source.json()["status"] == "completed"
+    assert recovered_source.json()["updated_at"] >= failed_source.json()["updated_at"]
+
+
+
 def test_invalid_job_status_transition_returns_409() -> None:
     client = TestClient(app)
 
