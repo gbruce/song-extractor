@@ -6,6 +6,14 @@ from uuid import uuid4
 
 from app.db import bootstrap_database
 
+TERMINAL_JOB_STATUSES = {"completed", "failed"}
+ALLOWED_JOB_STATUS_TRANSITIONS = {
+    "queued": {"running", "failed"},
+    "running": {"completed", "failed"},
+    "completed": set(),
+    "failed": set(),
+}
+
 
 class SQLiteStore:
     def __init__(self, database_path: Path) -> None:
@@ -36,12 +44,14 @@ class SQLiteStore:
                 SELECT
                     p.id,
                     p.name,
+                    p.created_at,
+                    p.updated_at,
                     COUNT(DISTINCT s.id) AS source_count,
                     COUNT(DISTINCT j.id) AS job_count
                 FROM projects p
                 LEFT JOIN sources s ON s.project_id = p.id
                 LEFT JOIN jobs j ON j.project_id = p.id
-                GROUP BY p.id, p.name
+                GROUP BY p.id, p.name, p.created_at, p.updated_at
                 ORDER BY p.rowid DESC
                 """
             ).fetchall()
@@ -51,7 +61,10 @@ class SQLiteStore:
         project_id = f"proj_{uuid4().hex[:10]}"
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO projects (id, name) VALUES (?, ?)",
+                """
+                INSERT INTO projects (id, name, created_at, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
                 (project_id, name),
             )
         return self._project_summary(project_id)
@@ -66,7 +79,7 @@ class SQLiteStore:
                 dict(row)
                 for row in connection.execute(
                     """
-                    SELECT id, project_id, kind, value, status
+                    SELECT id, project_id, kind, value, status, created_at, updated_at
                     FROM sources
                     WHERE project_id = ?
                     ORDER BY rowid ASC
@@ -78,7 +91,7 @@ class SQLiteStore:
                 dict(row)
                 for row in connection.execute(
                     """
-                    SELECT id, project_id, source_id, job_type, status
+                    SELECT id, project_id, source_id, job_type, status, created_at, updated_at
                     FROM jobs
                     WHERE project_id = ?
                     ORDER BY rowid ASC
@@ -101,13 +114,13 @@ class SQLiteStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO sources (id, project_id, kind, value, status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sources (id, project_id, kind, value, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (source_id, project_id, kind, value, "submitted"),
             )
             row = connection.execute(
-                "SELECT id, project_id, kind, value, status FROM sources WHERE id = ?",
+                "SELECT id, project_id, kind, value, status, created_at, updated_at FROM sources WHERE id = ?",
                 (source_id,),
             ).fetchone()
         return dict(row) if row else None
@@ -119,7 +132,7 @@ class SQLiteStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, project_id, source_id, job_type, status
+                SELECT id, project_id, source_id, job_type, status, created_at, updated_at
                 FROM jobs
                 WHERE project_id = ?
                 ORDER BY rowid ASC
@@ -143,16 +156,51 @@ class SQLiteStore:
             job_id = f"job_{uuid4().hex[:10]}"
             connection.execute(
                 """
-                INSERT INTO jobs (id, project_id, source_id, job_type, status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO jobs (id, project_id, source_id, job_type, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (job_id, project_id, source_id, job_type, "queued"),
             )
             row = connection.execute(
-                "SELECT id, project_id, source_id, job_type, status FROM jobs WHERE id = ?",
+                "SELECT id, project_id, source_id, job_type, status, created_at, updated_at FROM jobs WHERE id = ?",
                 (job_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def update_job_status(self, project_id: str, job_id: str, status: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, project_id, source_id, job_type, status, created_at, updated_at
+                FROM jobs
+                WHERE id = ? AND project_id = ?
+                """,
+                (job_id, project_id),
+            ).fetchone()
+            if row is None:
+                return None
+
+            current_status = row["status"]
+            if status not in ALLOWED_JOB_STATUS_TRANSITIONS.get(current_status, set()):
+                raise ValueError("Invalid job status transition")
+
+            connection.execute(
+                """
+                UPDATE jobs
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND project_id = ?
+                """,
+                (status, job_id, project_id),
+            )
+            updated_row = connection.execute(
+                """
+                SELECT id, project_id, source_id, job_type, status, created_at, updated_at
+                FROM jobs
+                WHERE id = ? AND project_id = ?
+                """,
+                (job_id, project_id),
+            ).fetchone()
+        return dict(updated_row) if updated_row else None
 
     def _project_summary(self, project_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
@@ -161,17 +209,20 @@ class SQLiteStore:
                 SELECT
                     p.id,
                     p.name,
+                    p.created_at,
+                    p.updated_at,
                     COUNT(DISTINCT s.id) AS source_count,
                     COUNT(DISTINCT j.id) AS job_count
                 FROM projects p
                 LEFT JOIN sources s ON s.project_id = p.id
                 LEFT JOIN jobs j ON j.project_id = p.id
                 WHERE p.id = ?
-                GROUP BY p.id, p.name
+                GROUP BY p.id, p.name, p.created_at, p.updated_at
                 """,
                 (project_id,),
             ).fetchone()
         return dict(row) if row else None
+
 
 
 def reset_store(store: SQLiteStore) -> None:

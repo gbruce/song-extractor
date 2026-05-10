@@ -1,6 +1,8 @@
 export type ProjectSummary = {
   id: string
   name: string
+  created_at: string
+  updated_at: string
   source_count: number
   job_count: number
 }
@@ -11,6 +13,8 @@ export type SourceRecord = {
   kind: 'youtube' | 'upload' | 'local_file'
   value: string
   status: string
+  created_at: string
+  updated_at: string
 }
 
 export type JobRecord = {
@@ -18,7 +22,9 @@ export type JobRecord = {
   project_id: string
   source_id: string
   job_type: 'ingest' | 'transcribe' | 'separate'
-  status: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  created_at: string
+  updated_at: string
 }
 
 export type ProjectDetail = ProjectSummary & {

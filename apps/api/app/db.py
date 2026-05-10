@@ -3,18 +3,19 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True)
 class Migration:
     version: str
-    sql: str
+    apply: Callable[[sqlite3.Connection], None]
 
 
-MIGRATIONS: tuple[Migration, ...] = (
-    Migration(
-        version="0001_initial_schema",
-        sql="""
+
+def _apply_0001_initial_schema(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
         CREATE TABLE IF NOT EXISTS projects (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL
@@ -38,9 +39,45 @@ MIGRATIONS: tuple[Migration, ...] = (
             FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
             FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
         );
-        """,
-    ),
+        """
+    )
+
+
+
+def _column_names(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
+
+
+
+def _ensure_timestamp_columns(connection: sqlite3.Connection, table_name: str) -> None:
+    columns = _column_names(connection, table_name)
+
+    if "created_at" not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN created_at TEXT")
+    if "updated_at" not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN updated_at TEXT")
+
+    connection.execute(
+        f"""
+        UPDATE {table_name}
+        SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP),
+            updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+        """
+    )
+
+
+
+def _apply_0002_add_timestamps(connection: sqlite3.Connection) -> None:
+    for table_name in ("projects", "sources", "jobs"):
+        _ensure_timestamp_columns(connection, table_name)
+
+
+MIGRATIONS: tuple[Migration, ...] = (
+    Migration(version="0001_initial_schema", apply=_apply_0001_initial_schema),
+    Migration(version="0002_add_timestamps", apply=_apply_0002_add_timestamps),
 )
+
 
 
 def _connect(database_path: Path) -> sqlite3.Connection:
@@ -75,7 +112,7 @@ def bootstrap_database(database_path: Path) -> None:
         for migration in MIGRATIONS:
             if migration.version in applied_versions:
                 continue
-            connection.executescript(migration.sql)
+            migration.apply(connection)
             connection.execute(
                 "INSERT INTO schema_migrations (version) VALUES (?)",
                 (migration.version,),

@@ -24,6 +24,8 @@ def test_project_source_and_job_workflow() -> None:
     assert project["name"] == "My Test Track"
     assert project["source_count"] == 0
     assert project["job_count"] == 0
+    assert project["created_at"]
+    assert project["updated_at"]
 
     create_source = client.post(
         f"/api/projects/{project['id']}/sources",
@@ -33,6 +35,8 @@ def test_project_source_and_job_workflow() -> None:
     source = create_source.json()
     assert source["project_id"] == project["id"]
     assert source["status"] == "submitted"
+    assert source["created_at"]
+    assert source["updated_at"]
 
     create_job = client.post(
         f"/api/projects/{project['id']}/jobs",
@@ -43,6 +47,8 @@ def test_project_source_and_job_workflow() -> None:
     assert job["project_id"] == project["id"]
     assert job["source_id"] == source["id"]
     assert job["status"] == "queued"
+    assert job["created_at"]
+    assert job["updated_at"]
 
     project_detail = client.get(f"/api/projects/{project['id']}")
     assert project_detail.status_code == 200
@@ -52,10 +58,59 @@ def test_project_source_and_job_workflow() -> None:
     assert len(detailed["jobs"]) == 1
     assert detailed["sources"][0]["value"] == "https://youtube.com/watch?v=demo123"
     assert detailed["jobs"][0]["job_type"] == "ingest"
+    assert detailed["sources"][0]["created_at"]
+    assert detailed["jobs"][0]["updated_at"]
 
     jobs = client.get(f"/api/projects/{project['id']}/jobs")
     assert jobs.status_code == 200
     assert len(jobs.json()) == 1
+
+
+def test_job_status_transition_updates_job_state_and_timestamp() -> None:
+    client = TestClient(app)
+
+    project = client.post("/api/projects", json={"name": "Status Track"}).json()
+    source = client.post(
+        f"/api/projects/{project['id']}/sources",
+        json={"kind": "youtube", "value": "https://youtube.com/watch?v=status123"},
+    ).json()
+    job = client.post(
+        f"/api/projects/{project['id']}/jobs",
+        json={"source_id": source["id"], "job_type": "ingest"},
+    ).json()
+
+    update_job = client.patch(
+        f"/api/projects/{project['id']}/jobs/{job['id']}",
+        json={"status": "running"},
+    )
+
+    assert update_job.status_code == 200
+    updated_job = update_job.json()
+    assert updated_job["status"] == "running"
+    assert updated_job["updated_at"] >= job["updated_at"]
+
+
+
+def test_invalid_job_status_transition_returns_409() -> None:
+    client = TestClient(app)
+
+    project = client.post("/api/projects", json={"name": "Invalid Status Track"}).json()
+    source = client.post(
+        f"/api/projects/{project['id']}/sources",
+        json={"kind": "youtube", "value": "https://youtube.com/watch?v=invalid123"},
+    ).json()
+    job = client.post(
+        f"/api/projects/{project['id']}/jobs",
+        json={"source_id": source["id"], "job_type": "ingest"},
+    ).json()
+
+    update_job = client.patch(
+        f"/api/projects/{project['id']}/jobs/{job['id']}",
+        json={"status": "completed"},
+    )
+
+    assert update_job.status_code == 409
+    assert update_job.json()["detail"] == "Invalid job status transition"
 
 
 def test_creating_source_for_unknown_project_returns_404() -> None:
