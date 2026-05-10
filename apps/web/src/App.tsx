@@ -42,6 +42,23 @@ const jobStatusMeta: Record<
   },
 }
 
+function getSourceStatusMeta(status: string) {
+  switch (status) {
+    case 'submitted':
+      return {
+        label: 'Submitted',
+        hint: 'awaiting processing',
+        tone: 'submitted',
+      } as const
+    default:
+      return {
+        label: status.charAt(0).toUpperCase() + status.slice(1),
+        hint: 'status reported by backend',
+        tone: 'submitted',
+      } as const
+  }
+}
+
 function formatTimestamp(label: string, value: string) {
   return `${label}: ${value}`
 }
@@ -339,18 +356,53 @@ function App() {
                   <p className="muted">No sources submitted yet.</p>
                 ) : (
                   <ul className="list compact">
-                    {projectDetail.sources.map((source) => (
-                      <li key={source.id} className="list-row detail-card">
-                        <div className="stack-xs">
-                          <span>
-                            <strong>{source.kind}</strong> — {source.value}
-                          </span>
-                          <span>{formatTimestamp('Submitted', source.created_at)}</span>
-                          <span>{formatTimestamp('Updated', source.updated_at)}</span>
-                        </div>
-                        <span>{source.status}</span>
-                      </li>
-                    ))}
+                    {projectDetail.sources.map((source) => {
+                      const sourceStatusMeta = getSourceStatusMeta(source.status)
+                      const sourceJobs = projectDetail.jobs.filter((job) => job.source_id === source.id)
+                      const sourceJobSummary = {
+                        total: sourceJobs.length,
+                        active: sourceJobs.filter(
+                          (job) => job.status === 'queued' || job.status === 'running',
+                        ).length,
+                        done: sourceJobs.filter((job) => job.status === 'completed').length,
+                        failed: sourceJobs.filter((job) => job.status === 'failed').length,
+                        latestUpdatedAt:
+                          sourceJobs.length > 0
+                            ? sourceJobs
+                                .map((job) => job.updated_at)
+                                .sort((left, right) => right.localeCompare(left))[0]
+                            : null,
+                      }
+
+                      return (
+                        <li key={source.id} className="list-row detail-card">
+                          <div className="stack-xs grow">
+                            <div className="job-header-row">
+                              <span>
+                                <strong>{source.kind}</strong> — {source.value}
+                              </span>
+                              <span className={`status-badge status-${sourceStatusMeta.tone}`}>
+                                {sourceStatusMeta.label} • {sourceStatusMeta.hint}
+                              </span>
+                            </div>
+                            <span>{formatTimestamp('Submitted', source.created_at)}</span>
+                            <span>{formatTimestamp('Updated', source.updated_at)}</span>
+                            <span className="muted">{sourceJobSummary.total} linked jobs</span>
+                            <span className="muted">
+                              {sourceJobSummary.active} active • {sourceJobSummary.done} done •{' '}
+                              {sourceJobSummary.failed} failed
+                            </span>
+                            {sourceJobSummary.latestUpdatedAt ? (
+                              <span className="muted">
+                                {formatTimestamp('Latest job update', sourceJobSummary.latestUpdatedAt)}
+                              </span>
+                            ) : (
+                              <span className="muted">No linked jobs yet.</span>
+                            )}
+                          </div>
+                        </li>
+                      )
+                    })}
                   </ul>
                 )}
               </div>

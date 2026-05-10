@@ -219,6 +219,12 @@ ul {
   color: #9fdcff;
 }
 
+.status-submitted {
+  background: rgba(143, 183, 255, 0.12);
+  border-color: rgba(143, 183, 255, 0.35);
+  color: #b9d2ff;
+}
+
 .status-running {
   background: rgba(124, 92, 255, 0.12);
   border-color: rgba(124, 92, 255, 0.35);

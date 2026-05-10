@@ -100,6 +100,15 @@ describe('App', () => {
     expect(screen.getByText('No further transitions available.')).toBeInTheDocument()
   })
 
+  it('renders source status badges and linked job summaries', async () => {
+    render(<App />)
+
+    expect(await screen.findByText('Submitted • awaiting processing')).toBeInTheDocument()
+    expect(screen.getByText('2 linked jobs')).toBeInTheDocument()
+    expect(screen.getByText('1 active • 1 done • 0 failed')).toBeInTheDocument()
+    expect(screen.getByText('Latest job update: 2026-05-10T00:09:00Z')).toBeInTheDocument()
+  })
+
   it('offers valid job status transitions and updates the job', async () => {
     const user = userEvent.setup()
     render(<App />)
