@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api } from './api'
-import type { JobRecord, ProjectDetail, ProjectSummary, SourceRecord } from './types'
+import type { JobRecord, ProjectDetail, ProjectSummary, RecentLogsResponse, SourceRecord } from './types'
 
 const apiBaseUrl = api.getApiBaseUrl()
+const LOG_REFRESH_INTERVAL_MS = 5_000
 
 const allowedNextStatuses: Record<JobRecord['status'], JobRecord['status'][]> = {
   queued: ['running', 'failed'],
@@ -92,10 +93,12 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [sourceStatusSelections, setSourceStatusSelections] = useState<
-    Record<string, SourceRecord['status']>
-  >({})
+  const [sourceStatusSelections, setSourceStatusSelections] = useState<Record<string, SourceRecord['status']>>({})
   const [jobStatusSelections, setJobStatusSelections] = useState<Record<string, JobRecord['status']>>({})
+  const [recentLogs, setRecentLogs] = useState<RecentLogsResponse>({ entries: [], total: 0 })
+  const [logError, setLogError] = useState('')
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [autoRefreshLogs, setAutoRefreshLogs] = useState(true)
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -111,6 +114,25 @@ function App() {
       failed: jobs.filter((job) => job.status === 'failed').length,
     }
   }, [projectDetail])
+
+  async function loadRecentLogs(options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false
+    if (!silent) {
+      setLogsLoading(true)
+    }
+    setLogError('')
+
+    try {
+      const data = await api.getRecentLogs(50)
+      setRecentLogs(data)
+    } catch (err) {
+      setLogError(err instanceof Error ? err.message : 'Failed to load recent logs')
+    } finally {
+      if (!silent) {
+        setLogsLoading(false)
+      }
+    }
+  }
 
   async function loadProjects(preferredProjectId?: string) {
     const data = await api.listProjects()
@@ -149,6 +171,24 @@ function App() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load projects'))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    loadRecentLogs().catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (!autoRefreshLogs) {
+      return undefined
+    }
+
+    const timer = window.setInterval(() => {
+      loadRecentLogs({ silent: true }).catch(() => undefined)
+    }, LOG_REFRESH_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [autoRefreshLogs])
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -417,8 +457,7 @@ function App() {
                     {projectDetail.sources.map((source) => {
                       const sourceStatusMeta = getSourceStatusMeta(source.status)
                       const nextSourceStatuses = allowedNextSourceStatuses[source.status]
-                      const selectedSourceStatus =
-                        sourceStatusSelections[source.id] ?? nextSourceStatuses[0]
+                      const selectedSourceStatus = sourceStatusSelections[source.id] ?? nextSourceStatuses[0]
                       const sourceJobs = projectDetail.jobs.filter((job) => job.source_id === source.id)
                       const sourceJobSummary = {
                         total: sourceJobs.length,
@@ -599,6 +638,39 @@ function App() {
                 )}
               </div>
             </div>
+          )}
+        </section>
+
+        <section className="panel stack-md">
+          <div className="log-panel-header">
+            <div className="stack-xs">
+              <h2>Server logs</h2>
+              <p className="muted">
+                Recent buffered API log lines from the backend. Auto-refresh is on by default.
+              </p>
+            </div>
+            <div className="inline-actions log-panel-controls">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={autoRefreshLogs}
+                  onChange={(event) => setAutoRefreshLogs(event.target.checked)}
+                />
+                <span>Auto-refresh</span>
+              </label>
+              <button type="button" onClick={() => loadRecentLogs()} disabled={logsLoading}>
+                {logsLoading ? 'Refreshing…' : 'Refresh logs'}
+              </button>
+            </div>
+          </div>
+          <p className="muted">Showing {recentLogs.entries.length} of {recentLogs.total} buffered log lines</p>
+          {logError ? <p className="error">{logError}</p> : null}
+          {recentLogs.entries.length === 0 ? (
+            <p className="muted">No log lines captured yet.</p>
+          ) : (
+            <pre className="log-console" aria-label="Recent server log lines">
+              {recentLogs.entries.join('\n')}
+            </pre>
           )}
         </section>
 

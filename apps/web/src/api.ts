@@ -1,4 +1,4 @@
-import type { JobRecord, ProjectDetail, ProjectSummary, SourceRecord } from './types'
+import type { JobRecord, ProjectDetail, ProjectSummary, RecentLogsResponse, SourceRecord } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -62,5 +62,8 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     })
+  },
+  getRecentLogs(limit = 50): Promise<RecentLogsResponse> {
+    return request<RecentLogsResponse>(`/api/logs/recent?limit=${limit}`)
   },
 }

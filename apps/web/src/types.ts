@@ -31,3 +31,8 @@ export type ProjectDetail = ProjectSummary & {
   sources: SourceRecord[]
   jobs: JobRecord[]
 }
+
+export type RecentLogsResponse = {
+  entries: string[]
+  total: number
+}

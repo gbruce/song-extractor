@@ -270,6 +270,45 @@ ul {
   color: #ffd38b;
 }
 
+.log-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.log-panel-controls {
+  align-items: center;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #dfe8fb;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
+.log-console {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  background: #0a0f1c;
+  border: 1px solid #26314f;
+  color: #dfe8fb;
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 a {
   color: #8fb7ff;
 }

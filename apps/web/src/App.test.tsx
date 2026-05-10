@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { api } from './api'
-import type { ProjectDetail, ProjectSummary, SourceRecord } from './types'
+import type { JobRecord, ProjectDetail, ProjectSummary, SourceRecord } from './types'
 
 vi.mock('./api', () => ({
   api: {
@@ -16,6 +16,7 @@ vi.mock('./api', () => ({
     createJob: vi.fn(),
     updateSourceStatus: vi.fn(),
     updateJobStatus: vi.fn(),
+    getRecentLogs: vi.fn(),
   },
 }))
 
@@ -65,6 +66,11 @@ const projectDetail: ProjectDetail = {
   ],
 }
 
+const recentLogsResponse = {
+  entries: ['INFO songcraft.api: Health check requested', 'INFO songcraft.api: Refreshed logs'],
+  total: 2,
+}
+
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -83,6 +89,7 @@ describe('App', () => {
       status: 'running',
       updated_at: '2026-05-10T00:06:00Z',
     })
+    mockApi.getRecentLogs.mockResolvedValue(recentLogsResponse)
   })
 
   it('renders project, source, and job timestamps', async () => {
@@ -186,6 +193,34 @@ describe('App', () => {
     })
 
     expect(await screen.findByText('Updated source src_123 to completed')).toBeInTheDocument()
+  })
+
+  it('renders a server log viewer and refreshes log entries on demand', async () => {
+    const user = userEvent.setup()
+    const refreshedLogs = {
+      entries: ['INFO songcraft.api: Health check requested', 'WARN songcraft.api: Manual refresh triggered'],
+      total: 2,
+    }
+    mockApi.getRecentLogs
+      .mockResolvedValueOnce(recentLogsResponse)
+      .mockResolvedValueOnce(refreshedLogs)
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Server logs' })).toBeInTheDocument()
+    const logConsole = screen.getByLabelText('Recent server log lines')
+    expect(logConsole).toHaveTextContent('INFO songcraft.api: Health check requested')
+    expect(logConsole).toHaveTextContent('INFO songcraft.api: Refreshed logs')
+    expect(screen.getByText('Showing 2 of 2 buffered log lines')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Refresh logs' }))
+
+    await waitFor(() => {
+      expect(mockApi.getRecentLogs).toHaveBeenCalledTimes(2)
+      expect(screen.getByLabelText('Recent server log lines')).toHaveTextContent(
+        'WARN songcraft.api: Manual refresh triggered',
+      )
+    })
   })
 
   it('offers valid job status transitions and updates the job', async () => {
