@@ -4,7 +4,6 @@ import { api } from './api'
 import type { JobRecord, ProjectDetail, ProjectSummary, RecentLogsResponse, SourceRecord } from './types'
 
 const apiBaseUrl = api.getApiBaseUrl()
-const LOG_REFRESH_INTERVAL_MS = 5_000
 
 const allowedNextStatuses: Record<JobRecord['status'], JobRecord['status'][]> = {
   queued: ['running', 'failed'],
@@ -181,12 +180,25 @@ function App() {
       return undefined
     }
 
-    const timer = window.setInterval(() => {
-      loadRecentLogs({ silent: true }).catch(() => undefined)
-    }, LOG_REFRESH_INTERVAL_MS)
+    const stream = new EventSource(`${apiBaseUrl}/api/logs/stream`)
+
+    stream.onmessage = (event) => {
+      setLogError('')
+      setLogsLoading(false)
+      setRecentLogs((current) => ({
+        entries: [...current.entries, event.data].slice(-50),
+        total: current.total + 1,
+      }))
+    }
+
+    stream.onerror = () => {
+      setLogError('Live stream disconnected. Use Refresh logs to retry.')
+      setLogsLoading(false)
+      stream.close()
+    }
 
     return () => {
-      window.clearInterval(timer)
+      stream.close()
     }
   }, [autoRefreshLogs])
 

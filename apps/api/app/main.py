@@ -1,5 +1,6 @@
 from collections import deque
 import logging
+from queue import Queue
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +24,8 @@ app.add_middleware(
 )
 app.state.store = SQLiteStore(settings.sqlite_path)
 app.state.log_buffer = deque(maxlen=200)
-app.state.log_handler = InMemoryLogHandler(app.state.log_buffer)
+app.state.log_subscribers = []
+app.state.log_handler = InMemoryLogHandler(app.state.log_buffer, app.state.log_subscribers)
 app.state.log_handler.setFormatter(logging.Formatter('%(levelname)s %(name)s: %(message)s'))
 api_logger = logging.getLogger('songcraft.api')
 api_logger.setLevel(logging.INFO)

@@ -1,6 +1,38 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+type EventSourceMessageHandler = ((event: MessageEvent<string>) => void) | null
+
+type EventSourceErrorHandler = ((event: Event) => void) | null
+
+class MockEventSource {
+  static instances: MockEventSource[] = []
+
+  onmessage: EventSourceMessageHandler = null
+  onerror: EventSourceErrorHandler = null
+  readonly url: string
+  closed = false
+
+  constructor(url: string) {
+    this.url = url
+    MockEventSource.instances.push(this)
+  }
+
+  close() {
+    this.closed = true
+  }
+
+  emitMessage(data: string) {
+    this.onmessage?.({ data } as MessageEvent<string>)
+  }
+
+  emitError() {
+    this.onerror?.(new Event('error'))
+  }
+}
+
+vi.stubGlobal('EventSource', MockEventSource)
 
 import App from './App'
 import { api } from './api'
@@ -74,6 +106,7 @@ const recentLogsResponse = {
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    MockEventSource.instances = []
     mockApi.listProjects.mockResolvedValue([projectSummary])
     mockApi.getProject.mockResolvedValue(projectDetail)
     mockApi.createProject.mockResolvedValue(projectSummary)
@@ -219,6 +252,51 @@ describe('App', () => {
       expect(mockApi.getRecentLogs).toHaveBeenCalledTimes(2)
       expect(screen.getByLabelText('Recent server log lines')).toHaveTextContent(
         'WARN songcraft.api: Manual refresh triggered',
+      )
+    })
+  })
+
+  it('streams new server log lines over SSE and falls back to manual refresh after stream errors', async () => {
+    const user = userEvent.setup()
+    const fallbackLogs = {
+      entries: ['INFO songcraft.api: Health check requested', 'ERROR songcraft.api: Stream disconnected'],
+      total: 2,
+    }
+    mockApi.getRecentLogs
+      .mockResolvedValueOnce(recentLogsResponse)
+      .mockResolvedValueOnce(fallbackLogs)
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Server logs' })
+    expect(MockEventSource.instances).toHaveLength(1)
+    expect(MockEventSource.instances[0].url).toBe('http://localhost:8000/api/logs/stream')
+
+    await act(async () => {
+      MockEventSource.instances[0].emitMessage('WARN songcraft.api: Live stream connected')
+    })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Recent server log lines')).toHaveTextContent(
+        'WARN songcraft.api: Live stream connected',
+      )
+    })
+
+    await act(async () => {
+      MockEventSource.instances[0].emitError()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Live stream disconnected. Use Refresh logs to retry.')).toBeInTheDocument()
+      expect(MockEventSource.instances[0].closed).toBe(true)
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Refresh logs' }))
+
+    await waitFor(() => {
+      expect(mockApi.getRecentLogs).toHaveBeenCalledTimes(2)
+      expect(screen.getByLabelText('Recent server log lines')).toHaveTextContent(
+        'ERROR songcraft.api: Stream disconnected',
       )
     })
   })

@@ -64,4 +64,22 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByText(/Updated source .* to completed/)).toBeVisible()
     await expect(page.getByText('Completed • ready for downstream steps')).toBeVisible()
   })
+
+  test('log viewer streams new health-check lines and supports manual refresh fallback', async ({ page, request }) => {
+    await page.goto('/')
+
+    await expect(page.getByRole('heading', { name: 'Server logs' })).toBeVisible()
+    const logConsole = page.getByLabel('Recent server log lines')
+    await expect(logConsole).toContainText('Health check requested')
+
+    const baselineText = await logConsole.textContent()
+    await request.get('http://127.0.0.1:8000/api/health')
+
+    await expect.poll(async () => await logConsole.textContent()).not.toBe(baselineText)
+    await expect(logConsole).toContainText('Health check requested')
+
+    await page.getByRole('checkbox', { name: 'Auto-refresh' }).uncheck()
+    await page.getByRole('button', { name: 'Refresh logs' }).click()
+    await expect(logConsole).toContainText('Health check requested')
+  })
 })
