@@ -208,6 +208,27 @@ class SQLiteStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def claim_next_queued_job(self, job_type: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, project_id
+                FROM jobs
+                WHERE job_type = ? AND status = 'queued'
+                ORDER BY rowid ASC
+                LIMIT 1
+                """,
+                (job_type,),
+            ).fetchone()
+            if row is None:
+                return None
+
+        return self.update_job_status(
+            project_id=row['project_id'],
+            job_id=row['id'],
+            status='running',
+        )
+
     def update_job_status(self, project_id: str, job_id: str, status: str) -> dict[str, str] | None:
         with self._connect() as connection:
             row = connection.execute(

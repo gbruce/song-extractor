@@ -1,6 +1,6 @@
 from collections import deque
+from contextlib import asynccontextmanager
 import logging
-from queue import Queue
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,12 +9,26 @@ from app.api.routes_health import router as health_router
 from app.api.routes_projects import router as projects_router
 from app.config import get_settings
 from app.db import bootstrap_database
+from app.ingest_worker import IngestWorker
 from app.logging_utils import InMemoryLogHandler
 from app.store import SQLiteStore
 
 settings = get_settings()
 bootstrap_database(settings.sqlite_path)
-app = FastAPI(title=settings.app_name)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.ingest_worker_enabled:
+        app.state.ingest_worker.start()
+    try:
+        yield
+    finally:
+        if settings.ingest_worker_enabled:
+            app.state.ingest_worker.stop()
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -32,5 +46,11 @@ api_logger.setLevel(logging.INFO)
 api_logger.propagate = False
 if not any(isinstance(handler, InMemoryLogHandler) for handler in api_logger.handlers):
     api_logger.addHandler(app.state.log_handler)
+app.state.ingest_worker = IngestWorker(
+    store=app.state.store,
+    logger=api_logger,
+    poll_interval_seconds=settings.ingest_worker_poll_interval_seconds,
+    processing_delay_seconds=settings.ingest_worker_processing_delay_seconds,
+)
 app.include_router(health_router, prefix='/api', tags=['health'])
 app.include_router(projects_router, prefix='/api')

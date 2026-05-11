@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -125,3 +126,33 @@ def test_log_stream_endpoint_emits_existing_and_new_entries() -> None:
         'data: WARN streamed line\n\n',
     ]
     assert app.state.log_subscribers == []
+
+
+def test_recent_logs_endpoint_includes_worker_messages() -> None:
+    app.state.log_buffer.clear()
+
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Worker Logs Track'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=worker-logs'},
+        ).json()
+        client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        )
+
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
+            response = client.get('/api/logs/recent?limit=20')
+            entries = response.json()['entries']
+            if any('Processing ingest job' in entry for entry in entries) and any(
+                'Completed ingest job' in entry for entry in entries
+            ):
+                break
+        else:
+            response = client.get('/api/logs/recent?limit=20')
+            entries = response.json()['entries']
+
+    assert any('Processing ingest job' in entry for entry in entries)
+    assert any('Completed ingest job' in entry for entry in entries)

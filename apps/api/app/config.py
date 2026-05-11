@@ -15,6 +15,9 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://namshub-1.tail9205d3.ts.net:5173",
     ]
+    ingest_worker_enabled: bool = True
+    ingest_worker_poll_interval_seconds: float = 0.05
+    ingest_worker_processing_delay_seconds: float = 0.1
     data_dir: Path = Path("./data")
     sqlite_filename: str = "songcraft.db"
 
