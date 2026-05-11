@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://namshub-1.tail9205d3.ts.net:5173",
     ]
     data_dir: Path = Path("./data")
     sqlite_filename: str = "songcraft.db"

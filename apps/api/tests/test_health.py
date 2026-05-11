@@ -37,6 +37,22 @@ def test_preflight_request_allows_frontend_origin() -> None:
     assert 'GET' in response.headers['access-control-allow-methods']
 
 
+def test_preflight_request_allows_tailscale_frontend_origin() -> None:
+    client = TestClient(app)
+
+    response = client.options(
+        '/api/projects',
+        headers={
+            'Origin': 'http://namshub-1.tail9205d3.ts.net:5173',
+            'Access-Control-Request-Method': 'GET',
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers['access-control-allow-origin'] == 'http://namshub-1.tail9205d3.ts.net:5173'
+    assert 'GET' in response.headers['access-control-allow-methods']
+
+
 def test_recent_logs_endpoint_returns_buffered_entries() -> None:
     client = TestClient(app)
 

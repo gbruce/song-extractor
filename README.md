@@ -120,7 +120,16 @@ cd apps/web
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
-The frontend is configured to call the API at `http://localhost:8000` by default.
+The frontend derives its default API URL from the browser hostname, so a page opened at `http://localhost:5173` will call `http://localhost:8000`, and a page opened at `http://namshub-1.tail9205d3.ts.net:5173` will call `http://namshub-1.tail9205d3.ts.net:8000`.
+
+If you need Vite to accept a non-local hostname such as a Tailscale DNS name, provide it at runtime instead of checking it into `vite.config.ts`:
+
+```bash
+cd apps/web
+__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=namshub-1.tail9205d3.ts.net npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+You can provide multiple hostnames as a comma-separated list in `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`.
 
 ## Common commands
 

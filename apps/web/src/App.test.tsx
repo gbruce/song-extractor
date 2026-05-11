@@ -256,6 +256,7 @@ describe('App', () => {
     })
   })
 
+
   it('streams new server log lines over SSE and falls back to manual refresh after stream errors', async () => {
     const user = userEvent.setup()
     const fallbackLogs = {
