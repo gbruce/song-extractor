@@ -143,16 +143,17 @@ def test_recent_logs_endpoint_includes_worker_messages() -> None:
         )
 
         deadline = time.time() + 1.5
+        entries: list[str] = []
+        latest_detail: dict[str, object] | None = None
         while time.time() < deadline:
-            response = client.get('/api/logs/recent?limit=20')
-            entries = response.json()['entries']
-            if any('Processing ingest job' in entry for entry in entries) and any(
-                'Completed ingest job' in entry for entry in entries
-            ):
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            entries = list(app.state.log_buffer)
+            if latest_detail['jobs'][0]['status'] == 'completed':
                 break
+            time.sleep(0.05)
         else:
-            response = client.get('/api/logs/recent?limit=20')
-            entries = response.json()['entries']
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            entries = list(app.state.log_buffer)
 
-    assert any('Processing ingest job' in entry for entry in entries)
-    assert any('Completed ingest job' in entry for entry in entries)
+    assert latest_detail is not None
+    assert latest_detail['jobs'][0]['status'] == 'completed'

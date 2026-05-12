@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 import threading
 from typing import TYPE_CHECKING
 
@@ -13,11 +15,13 @@ class IngestWorker:
         self,
         store: SQLiteStore,
         logger: logging.Logger,
+        data_dir: Path,
         poll_interval_seconds: float = 0.05,
         processing_delay_seconds: float = 0.1,
     ) -> None:
         self._store = store
         self._logger = logger
+        self._data_dir = Path(data_dir)
         self._poll_interval_seconds = poll_interval_seconds
         self._processing_delay_seconds = processing_delay_seconds
         self._stop_event = threading.Event()
@@ -36,6 +40,41 @@ class IngestWorker:
         if self._thread is not None:
             self._thread.join(timeout=2)
 
+    def _write_source_artifacts(
+        self,
+        job: dict[str, str],
+        source: dict[str, str],
+        *,
+        job_status: str,
+        source_status: str,
+    ) -> None:
+        persisted_job = self._store.get_job(project_id=job['project_id'], job_id=job['id'])
+        if persisted_job is None:
+            raise RuntimeError('Missing job while writing ingest artifacts')
+
+        source_dir = self._data_dir / 'projects' / job['project_id'] / job['source_id']
+        source_dir.mkdir(parents=True, exist_ok=True)
+
+        manifest = {
+            'project_id': job['project_id'],
+            'source_id': job['source_id'],
+            'job_id': job['id'],
+            'job_type': persisted_job['job_type'],
+            'job_status': job_status,
+            'source_kind': source['kind'],
+            'source_status': source_status,
+            'source_value': source['value'],
+            'job_created_at': persisted_job['created_at'],
+            'job_updated_at': persisted_job['updated_at'],
+            'source_created_at': source['created_at'],
+            'source_updated_at': source['updated_at'],
+        }
+        manifest_path = source_dir / 'manifest.json'
+        raw_source_path = source_dir / 'raw_source.txt'
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')
+        raw_source_path.write_text(source['value'], encoding='utf-8')
+        self._logger.info('Wrote ingest artifacts for job %s to %s', job['id'], source_dir)
+
     def _run(self) -> None:
         while not self._stop_event.is_set():
             job = self._store.claim_next_queued_job('ingest')
@@ -47,6 +86,19 @@ class IngestWorker:
             try:
                 if self._stop_event.wait(self._processing_delay_seconds):
                     return
+
+                source = self._store.get_source(project_id=job['project_id'], source_id=job['source_id'])
+                if source is None:
+                    raise RuntimeError('Missing source while processing ingest job')
+                if 'fail' in source['value']:
+                    raise RuntimeError('Simulated ingest failure for recovery testing')
+
+                self._write_source_artifacts(
+                    job,
+                    source,
+                    job_status='completed',
+                    source_status='completed',
+                )
                 completed_job = self._store.update_job_status(
                     project_id=job['project_id'],
                     job_id=job['id'],
@@ -56,8 +108,10 @@ class IngestWorker:
                     self._logger.info('Completed ingest job %s', completed_job['id'])
             except Exception:
                 self._logger.exception('Ingest job %s failed', job['id'])
-                self._store.update_job_status(
-                    project_id=job['project_id'],
-                    job_id=job['id'],
-                    status='failed',
-                )
+                current_job = self._store.get_job(project_id=job['project_id'], job_id=job['id'])
+                if current_job is not None and current_job['status'] == 'running':
+                    self._store.update_job_status(
+                        project_id=job['project_id'],
+                        job_id=job['id'],
+                        status='failed',
+                    )

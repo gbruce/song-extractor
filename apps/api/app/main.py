@@ -44,11 +44,14 @@ app.state.log_handler.setFormatter(logging.Formatter('%(levelname)s %(name)s: %(
 api_logger = logging.getLogger('songcraft.api')
 api_logger.setLevel(logging.INFO)
 api_logger.propagate = False
-if not any(isinstance(handler, InMemoryLogHandler) for handler in api_logger.handlers):
-    api_logger.addHandler(app.state.log_handler)
+for handler in list(api_logger.handlers):
+    if isinstance(handler, InMemoryLogHandler):
+        api_logger.removeHandler(handler)
+api_logger.addHandler(app.state.log_handler)
 app.state.ingest_worker = IngestWorker(
     store=app.state.store,
     logger=api_logger,
+    data_dir=settings.data_dir,
     poll_interval_seconds=settings.ingest_worker_poll_interval_seconds,
     processing_delay_seconds=settings.ingest_worker_processing_delay_seconds,
 )

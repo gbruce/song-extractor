@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type EventSourceMessageHandler = ((event: MessageEvent<string>) => void) | null
 
@@ -105,7 +105,8 @@ const recentLogsResponse = {
 
 describe('App', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
+    vi.useRealTimers()
     MockEventSource.instances = []
     mockApi.listProjects.mockResolvedValue([projectSummary])
     mockApi.getProject.mockResolvedValue(projectDetail)
@@ -123,6 +124,10 @@ describe('App', () => {
       updated_at: '2026-05-10T00:06:00Z',
     })
     mockApi.getRecentLogs.mockResolvedValue(recentLogsResponse)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('renders project, source, and job timestamps', async () => {
@@ -302,6 +307,79 @@ describe('App', () => {
     })
   })
 
+  it('auto-refreshes project detail while ingest jobs are active', async () => {
+    vi.useFakeTimers()
+
+    mockApi.getProject
+      .mockResolvedValueOnce(projectDetail)
+      .mockResolvedValueOnce({
+        ...projectDetail,
+        sources: [
+          {
+            ...sourceRecord,
+            status: 'processing',
+            updated_at: '2026-05-10T00:06:00Z',
+          },
+        ],
+        jobs: [
+          {
+            ...projectDetail.jobs[0],
+            status: 'running',
+            updated_at: '2026-05-10T00:06:00Z',
+          },
+          projectDetail.jobs[1],
+        ],
+      })
+      .mockResolvedValue({
+        ...projectDetail,
+        sources: [
+          {
+            ...sourceRecord,
+            status: 'completed',
+            updated_at: '2026-05-10T00:07:00Z',
+          },
+        ],
+        jobs: [
+          {
+            ...projectDetail.jobs[0],
+            status: 'completed',
+            updated_at: '2026-05-10T00:07:00Z',
+          },
+          projectDetail.jobs[1],
+        ],
+      })
+
+    render(<App />)
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText('Queued • waiting to start')).toBeInTheDocument()
+    expect(mockApi.getProject).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(250)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockApi.getProject).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('Running • currently processing')).toBeInTheDocument()
+    expect(screen.getByText('Processing • work is in progress')).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(250)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockApi.getProject).toHaveBeenCalledTimes(3)
+    expect(screen.getAllByText('Completed • no further action')).toHaveLength(2)
+    expect(screen.getByText('Completed • ready for downstream steps')).toBeInTheDocument()
+  })
+
   it('offers valid job status transitions and updates the job', async () => {
     const user = userEvent.setup()
     mockApi.getProject
@@ -324,7 +402,6 @@ describe('App', () => {
           projectDetail.jobs[1],
         ],
       })
-
     render(<App />)
 
     const statusSelect = await screen.findByLabelText('Update status for job job_123')
@@ -336,6 +413,7 @@ describe('App', () => {
     })
 
     expect(await screen.findByText('Updated job job_123 to running')).toBeInTheDocument()
+    expect(await screen.findByText('Running • currently processing')).toBeInTheDocument()
     expect(await screen.findByText('Processing • work is in progress')).toBeInTheDocument()
   })
 })

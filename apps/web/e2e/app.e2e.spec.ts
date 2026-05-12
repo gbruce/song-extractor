@@ -15,24 +15,22 @@ test.describe('songcraft baseline workflows', () => {
     await page.getByRole('button', { name: 'Submit source and queue ingest job' }).click()
     await expect(page.getByText('Submitted youtube source for ingest')).toBeVisible()
 
-    await expect(page.getByText('Submitted • awaiting processing')).toBeVisible()
-    await expect(page.getByText('Queued • waiting to start')).toBeVisible()
-    await expect(
-      page.getByText('Manual source overrides unlock after the active ingest job reaches a terminal state.'),
-    ).toBeVisible()
+    await expect(page.getByText('Manual source overrides unlock after the active ingest job reaches a terminal state.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Apply manual source override' })).toHaveCount(0)
 
-    const jobStatusSelect = page.getByLabel(/Update status for job job_/)
-    await jobStatusSelect.selectOption('running')
-    await page.getByRole('button', { name: 'Apply status' }).click()
-    await expect(page.getByText(/Updated job .* to running/)).toBeVisible()
-    await expect(page.getByText('Processing • work is in progress')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Apply manual source override' })).toHaveCount(0)
+    await expect.poll(async () => {
+      return {
+        sourceCompleted: await page.getByText('Completed • ready for downstream steps').count(),
+        jobCompleted: await page.getByText('Completed • no further action').count(),
+        applyStatusButtons: await page.getByRole('button', { name: 'Apply status' }).count(),
+      }
+    }).toEqual({
+      sourceCompleted: 1,
+      jobCompleted: 1,
+      applyStatusButtons: 0,
+    })
 
-    await jobStatusSelect.selectOption('completed')
-    await page.getByRole('button', { name: 'Apply status' }).click()
-    await expect(page.getByText(/Updated job .* to completed/)).toBeVisible()
-    await expect(page.getByText('Completed • ready for downstream steps')).toBeVisible()
+    await expect(page.getByText('No further transitions available.')).toBeVisible()
   })
 
   test('failure recovery path: failed ingest unlocks manual source recovery', async ({ page }) => {
@@ -48,13 +46,16 @@ test.describe('songcraft baseline workflows', () => {
     await page.getByLabel('Source value').fill(sourceValue)
     await page.getByRole('button', { name: 'Submit source and queue ingest job' }).click()
     await expect(page.getByText('Submitted youtube source for ingest')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Apply manual source override' })).toHaveCount(0)
 
-    const jobStatusSelect = page.getByLabel(/Update status for job job_/)
-    await jobStatusSelect.selectOption('failed')
-    await page.getByRole('button', { name: 'Apply status' }).click()
-    await expect(page.getByText(/Updated job .* to failed/)).toBeVisible()
-    await expect(page.locator('.status-badge.status-failed').first()).toBeVisible()
+    await expect.poll(async () => ({
+      failedBadgeCount: await page.locator('.status-badge.status-failed').count(),
+      sourceOverrideCount: await page.getByRole('button', { name: 'Apply manual source override' }).count(),
+      completedBadgeCount: await page.getByText('Completed • no further action').count(),
+    })).toEqual({
+      failedBadgeCount: 2,
+      sourceOverrideCount: 1,
+      completedBadgeCount: 0,
+    })
 
     const sourceStatusSelect = page.getByLabel(/Update status for source src_/)
     await expect(sourceStatusSelect).toBeVisible()

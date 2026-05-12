@@ -133,6 +133,31 @@ function App() {
     }
   }
 
+  function syncProjectDetail(detail: ProjectDetail | null) {
+    if (!detail) {
+      setProjectDetail(null)
+      setSourceStatusSelections({})
+      setJobStatusSelections({})
+      return
+    }
+
+    setProjectDetail(detail)
+    setSourceStatusSelections(
+      Object.fromEntries(
+        detail.sources
+          .filter((source) => allowedNextSourceStatuses[source.status].length > 0)
+          .map((source) => [source.id, allowedNextSourceStatuses[source.status][0]]),
+      ) as Record<string, SourceRecord['status']>,
+    )
+    setJobStatusSelections(
+      Object.fromEntries(
+        detail.jobs
+          .filter((job) => allowedNextStatuses[job.status].length > 0)
+          .map((job) => [job.id, allowedNextStatuses[job.status][0]]),
+      ) as Record<string, JobRecord['status']>,
+    )
+  }
+
   async function loadProjects(preferredProjectId?: string) {
     const data = await api.listProjects()
     setProjects(data)
@@ -142,25 +167,9 @@ function App() {
 
     if (nextSelectedId) {
       const detail = await api.getProject(nextSelectedId)
-      setProjectDetail(detail)
-      setSourceStatusSelections(
-        Object.fromEntries(
-          detail.sources
-            .filter((source) => allowedNextSourceStatuses[source.status].length > 0)
-            .map((source) => [source.id, allowedNextSourceStatuses[source.status][0]]),
-        ) as Record<string, SourceRecord['status']>,
-      )
-      setJobStatusSelections(
-        Object.fromEntries(
-          detail.jobs
-            .filter((job) => allowedNextStatuses[job.status].length > 0)
-            .map((job) => [job.id, allowedNextStatuses[job.status][0]]),
-        ) as Record<string, JobRecord['status']>,
-      )
+      syncProjectDetail(detail)
     } else {
-      setProjectDetail(null)
-      setSourceStatusSelections({})
-      setJobStatusSelections({})
+      syncProjectDetail(null)
     }
   }
 
@@ -174,6 +183,37 @@ function App() {
   useEffect(() => {
     loadRecentLogs().catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (!selectedProjectId || !projectDetail) {
+      return undefined
+    }
+
+    const hasActiveIngestJob = projectDetail.jobs.some(
+      (job) => job.job_type === 'ingest' && (job.status === 'queued' || job.status === 'running'),
+    )
+
+    if (!hasActiveIngestJob) {
+      return undefined
+    }
+
+    const refreshProjectDetail = async () => {
+      try {
+        const detail = await api.getProject(selectedProjectId)
+        syncProjectDetail(detail)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to refresh project detail')
+      }
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshProjectDetail()
+    }, 250)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [selectedProjectId, projectDetail])
 
   useEffect(() => {
     if (!autoRefreshLogs) {
@@ -230,21 +270,7 @@ function App() {
 
     try {
       const detail = await api.getProject(projectId)
-      setProjectDetail(detail)
-      setSourceStatusSelections(
-        Object.fromEntries(
-          detail.sources
-            .filter((source) => allowedNextSourceStatuses[source.status].length > 0)
-            .map((source) => [source.id, allowedNextSourceStatuses[source.status][0]]),
-        ) as Record<string, SourceRecord['status']>,
-      )
-      setJobStatusSelections(
-        Object.fromEntries(
-          detail.jobs
-            .filter((job) => allowedNextStatuses[job.status].length > 0)
-            .map((job) => [job.id, allowedNextStatuses[job.status][0]]),
-        ) as Record<string, JobRecord['status']>,
-      )
+      syncProjectDetail(detail)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project detail')
     } finally {

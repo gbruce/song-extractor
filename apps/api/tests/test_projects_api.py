@@ -95,6 +95,51 @@ def test_queued_ingest_job_is_processed_automatically() -> None:
         assert latest_detail['sources'][0]['status'] == 'completed'
 
 
+def test_ingest_worker_writes_source_artifacts() -> None:
+    settings = get_settings()
+    artifacts_root = settings.data_dir / 'projects'
+
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Artifact Track'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=artifact-ingest'},
+        ).json()
+        job = client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        ).json()
+
+        deadline = time.time() + 1.5
+        latest_detail = None
+        while time.time() < deadline:
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            if latest_detail['jobs'][0]['status'] == 'completed':
+                break
+            time.sleep(0.05)
+
+    assert latest_detail is not None
+    assert latest_detail['jobs'][0]['id'] == job['id']
+    assert latest_detail['jobs'][0]['status'] == 'completed'
+
+    source_dir = artifacts_root / project['id'] / source['id']
+    manifest_path = source_dir / 'manifest.json'
+    raw_source_path = source_dir / 'raw_source.txt'
+
+    assert source_dir.exists()
+    assert manifest_path.exists()
+    assert raw_source_path.exists()
+
+    manifest = manifest_path.read_text(encoding='utf-8')
+    raw_source = raw_source_path.read_text(encoding='utf-8')
+
+    assert project['id'] in manifest
+    assert source['id'] in manifest
+    assert job['id'] in manifest
+    assert 'artifact-ingest' in manifest
+    assert raw_source == 'https://youtube.com/watch?v=artifact-ingest'
+
+
 def test_non_ingest_jobs_are_not_processed_automatically() -> None:
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': 'Manual Transcribe Track'}).json()

@@ -131,6 +131,18 @@ class SQLiteStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_source(self, project_id: str, source_id: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, project_id, kind, value, status, created_at, updated_at
+                FROM sources
+                WHERE id = ? AND project_id = ?
+                """,
+                (source_id, project_id),
+            ).fetchone()
+        return dict(row) if row else None
+
     def update_source_status(self, project_id: str, source_id: str, status: str) -> dict[str, str] | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -181,6 +193,18 @@ class SQLiteStore:
                 (project_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_job(self, project_id: str, job_id: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, project_id, source_id, job_type, status, created_at, updated_at
+                FROM jobs
+                WHERE id = ? AND project_id = ?
+                """,
+                (job_id, project_id),
+            ).fetchone()
+        return dict(row) if row else None
 
     def add_job(self, project_id: str, source_id: str, job_type: str) -> dict[str, str] | None:
         if self._project_summary(project_id) is None:
