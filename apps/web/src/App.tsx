@@ -211,11 +211,11 @@ function App() {
       return undefined
     }
 
-    const hasActiveIngestJob = projectDetail.jobs.some(
-      (job) => job.job_type === 'ingest' && (job.status === 'queued' || job.status === 'running'),
+    const hasActiveJob = projectDetail.jobs.some(
+      (job) => job.status === 'queued' || job.status === 'running',
     )
 
-    if (!hasActiveIngestJob) {
+    if (!hasActiveJob) {
       return undefined
     }
 

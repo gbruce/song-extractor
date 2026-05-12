@@ -332,11 +332,20 @@ describe('App', () => {
     })
   })
 
-  it('auto-refreshes project detail while ingest jobs are active', async () => {
+  it('auto-refreshes project detail through ingest and transcribe completion', async () => {
     vi.useFakeTimers()
 
     mockApi.getProject
-      .mockResolvedValueOnce(projectDetail)
+      .mockResolvedValueOnce({
+        ...projectDetail,
+        jobs: [
+          {
+            ...projectDetail.jobs[0],
+            status: 'queued',
+            updated_at: '2026-05-10T00:04:00Z',
+          },
+        ],
+      })
       .mockResolvedValueOnce({
         ...projectDetail,
         sources: [
@@ -352,10 +361,9 @@ describe('App', () => {
             status: 'running',
             updated_at: '2026-05-10T00:06:00Z',
           },
-          projectDetail.jobs[1],
         ],
       })
-      .mockResolvedValue({
+      .mockResolvedValueOnce({
         ...projectDetail,
         sources: [
           {
@@ -370,7 +378,34 @@ describe('App', () => {
             status: 'completed',
             updated_at: '2026-05-10T00:07:00Z',
           },
-          projectDetail.jobs[1],
+          {
+            ...projectDetail.jobs[1],
+            status: 'queued',
+            created_at: '2026-05-10T00:07:30Z',
+            updated_at: '2026-05-10T00:07:30Z',
+          },
+        ],
+      })
+      .mockResolvedValue({
+        ...projectDetail,
+        sources: [
+          {
+            ...sourceRecord,
+            status: 'completed',
+            updated_at: '2026-05-10T00:08:00Z',
+          },
+        ],
+        jobs: [
+          {
+            ...projectDetail.jobs[0],
+            status: 'completed',
+            updated_at: '2026-05-10T00:07:00Z',
+          },
+          {
+            ...projectDetail.jobs[1],
+            status: 'completed',
+            updated_at: '2026-05-10T00:08:00Z',
+          },
         ],
       })
 
@@ -401,8 +436,21 @@ describe('App', () => {
     })
 
     expect(mockApi.getProject).toHaveBeenCalledTimes(3)
+    expect(screen.getByText('2 linked jobs')).toBeInTheDocument()
+    expect(screen.getByText('1 active • 1 done • 0 failed')).toBeInTheDocument()
+    expect(screen.getByText('Update status for job job_456')).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(250)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockApi.getProject).toHaveBeenCalledTimes(4)
     expect(screen.getAllByText('Completed • no further action')).toHaveLength(2)
-    expect(screen.getByText('Completed • ready for downstream steps')).toBeInTheDocument()
+    expect(screen.getByText('2 linked jobs')).toBeInTheDocument()
+    expect(screen.getByText('0 active • 2 done • 0 failed')).toBeInTheDocument()
+    expect(screen.getByText('Latest job update: 2026-05-10T00:08:00Z')).toBeInTheDocument()
   })
 
   it('offers valid job status transitions and updates the job', async () => {

@@ -22,7 +22,7 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', '/path/to/upload-staging/source.wav')
   })
 
-  test('happy path: ingest progresses from queued to completed', async ({ page }) => {
+  test('happy path: ingest auto-queues and completes transcribe after persistence', async ({ page }) => {
     const projectName = `E2E Happy Path ${Date.now()}`
     const sourceValue = `https://youtube.com/watch?v=happy${Date.now()}`
 
@@ -47,16 +47,21 @@ test.describe('songcraft baseline workflows', () => {
     await expect.poll(async () => {
       return {
         sourceCompleted: await page.getByText('Completed • ready for downstream steps').count(),
-        jobCompleted: await page.getByText('Completed • no further action').count(),
+        completedJobBadges: await page.getByText('Completed • no further action').count(),
+        transcribeJobs: await page.getByText(/transcribe — source src_/).count(),
         applyStatusButtons: await page.getByRole('button', { name: 'Apply status' }).count(),
       }
     }).toEqual({
       sourceCompleted: 1,
-      jobCompleted: 1,
+      completedJobBadges: 2,
+      transcribeJobs: 1,
       applyStatusButtons: 0,
     })
 
-    await expect(page.getByText('No further transitions available.')).toBeVisible()
+    await expect(page.getByText('2 linked jobs')).toBeVisible()
+    await expect(page.getByText('0 active • 2 done • 0 failed')).toBeVisible()
+    await expect(page.getByText('transcribe — source', { exact: false })).toBeVisible()
+    await expect(page.getByText('No further transitions available.')).toHaveCount(2)
   })
 
   test('failure recovery path: failed ingest unlocks manual source recovery', async ({ page }) => {

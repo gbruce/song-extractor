@@ -187,12 +187,79 @@ def test_ingest_worker_copies_local_file_source_media(tmp_path: Path) -> None:
     assert 'persisted_media_bytes' in manifest
 
 
-def test_non_ingest_jobs_are_not_processed_automatically() -> None:
+def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
+    settings = get_settings()
+    artifacts_root = settings.data_dir / 'projects'
+
     with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Manual Transcribe Track'}).json()
+        project = client.post('/api/projects', json={'name': 'Auto Transcribe Track'}).json()
         source = client.post(
             f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=manual-transcribe'},
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-transcribe'},
+        ).json()
+        job = client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        ).json()
+
+        deadline = time.time() + 2.0
+        latest_detail = None
+        while time.time() < deadline:
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            if len(latest_detail['jobs']) == 2 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                break
+            time.sleep(0.05)
+
+    assert latest_detail is not None
+    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe']
+    assert latest_detail['jobs'][0]['id'] == job['id']
+    assert all(item['status'] == 'completed' for item in latest_detail['jobs'])
+
+    source_dir = artifacts_root / project['id'] / source['id']
+    transcript_text_path = source_dir / 'transcription' / 'transcript.txt'
+    transcript_json_path = source_dir / 'transcription' / 'transcript.json'
+
+    assert transcript_text_path.exists()
+    assert transcript_json_path.exists()
+    assert 'auto-transcribe' in transcript_text_path.read_text(encoding='utf-8')
+    transcript_json = transcript_json_path.read_text(encoding='utf-8')
+    assert source['id'] in transcript_json
+    assert 'segments' in transcript_json
+    assert 'transcribe' in transcript_json
+
+
+def test_failed_ingest_does_not_queue_transcribe_job() -> None:
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Failed Ingest Stops Pipeline'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=fail-no-transcribe'},
+        ).json()
+        client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        ).json()
+
+        deadline = time.time() + 2.0
+        latest_detail = None
+        while time.time() < deadline:
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            if latest_detail['jobs'][0]['status'] == 'failed':
+                break
+            time.sleep(0.05)
+
+    assert latest_detail is not None
+    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest']
+    assert latest_detail['jobs'][0]['status'] == 'failed'
+    assert latest_detail['sources'][0]['status'] == 'failed'
+
+
+def test_separate_jobs_are_not_processed_automatically() -> None:
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Manual Separate Track'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=manual-separate'},
         ).json()
         source_processing = client.patch(
             f"/api/projects/{project['id']}/sources/{source['id']}",
@@ -207,7 +274,7 @@ def test_non_ingest_jobs_are_not_processed_automatically() -> None:
 
         job = client.post(
             f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'transcribe'},
+            json={'source_id': source['id'], 'job_type': 'separate'},
         ).json()
 
         time.sleep(0.2)

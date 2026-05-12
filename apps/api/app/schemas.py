@@ -21,3 +21,37 @@ class JobCreate(BaseModel):
 
 class JobStatusUpdate(BaseModel):
     status: str = Field(pattern="^(queued|running|completed|failed)$")
+
+
+class JobRecord(BaseModel):
+    id: str
+    project_id: str
+    source_id: str
+    job_type: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class SourceRecord(BaseModel):
+    id: str
+    project_id: str
+    kind: str
+    value: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class ProjectSummary(BaseModel):
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+    source_count: int
+    job_count: int
+
+
+class ProjectDetail(ProjectSummary):
+    sources: list[SourceRecord]
+    jobs: list[JobRecord]

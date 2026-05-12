@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import sqlite3
+import json
 from pathlib import Path
+import sqlite3
 from uuid import uuid4
 
 from app.db import bootstrap_database
 
 TERMINAL_JOB_STATUSES = {"completed", "failed"}
+FINAL_SOURCE_STATUSES = {"completed", "failed"}
 ALLOWED_SOURCE_STATUS_TRANSITIONS = {
     "submitted": {"processing", "failed"},
     "processing": {"completed", "failed"},
@@ -205,6 +207,44 @@ class SQLiteStore:
                 (job_id, project_id),
             ).fetchone()
         return dict(row) if row else None
+
+    def get_source_artifact_manifest(self, project_id: str, source_id: str, data_dir: Path) -> dict[str, object] | None:
+        manifest_path = Path(data_dir) / 'projects' / project_id / source_id / 'manifest.json'
+        if not manifest_path.exists():
+            return None
+        return json.loads(manifest_path.read_text(encoding='utf-8'))
+
+    def has_job(self, project_id: str, source_id: str, job_type: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM jobs
+                WHERE project_id = ? AND source_id = ? AND job_type = ?
+                LIMIT 1
+                """,
+                (project_id, source_id, job_type),
+            ).fetchone()
+        return row is not None
+
+    def maybe_queue_transcribe_job(self, *, project_id: str, source_id: str, data_dir: Path) -> dict[str, str] | None:
+        source = self.get_source(project_id=project_id, source_id=source_id)
+        if source is None or source['status'] not in FINAL_SOURCE_STATUSES:
+            return None
+        if source['status'] != 'completed':
+            return None
+        if self.has_job(project_id=project_id, source_id=source_id, job_type='transcribe'):
+            return None
+
+        manifest = self.get_source_artifact_manifest(project_id=project_id, source_id=source_id, data_dir=data_dir)
+        if manifest is None:
+            return None
+
+        persisted_media_path = manifest.get('persisted_media_path')
+        if not isinstance(persisted_media_path, str) or not persisted_media_path:
+            return None
+
+        return self.add_job(project_id=project_id, source_id=source_id, job_type='transcribe')
 
     def add_job(self, project_id: str, source_id: str, job_type: str) -> dict[str, str] | None:
         if self._project_summary(project_id) is None:
