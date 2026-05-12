@@ -168,6 +168,31 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
+  it('updates source-ingest persistence guidance when the source type changes', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findByText('Submitted • awaiting processing')).toBeInTheDocument()
+    expect(
+      screen.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Source value')).toHaveAttribute('placeholder', 'https://youtube.com/watch?v=...')
+
+    await user.selectOptions(screen.getByLabelText('Source type'), 'local_file')
+
+    expect(
+      screen.getByText('Local file sources are copied into source_media/<filename> during ingest.'),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Source value')).toHaveAttribute('placeholder', '/path/to/reference-track.wav')
+
+    await user.selectOptions(screen.getByLabelText('Source type'), 'upload')
+
+    expect(
+      screen.getByText('Uploaded-file sources currently ingest from a local staging path and copy it into source_media/<filename>.'),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Source value')).toHaveAttribute('placeholder', '/path/to/upload-staging/source.wav')
+  })
+
   it('offers source status transitions and updates the source after ingest completes', async () => {
     const user = userEvent.setup()
     mockApi.getProject.mockResolvedValue({

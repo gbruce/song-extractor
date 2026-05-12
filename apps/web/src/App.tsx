@@ -82,6 +82,28 @@ function formatTimestamp(label: string, value: string) {
   return `${label}: ${value}`
 }
 
+function getSourceValuePlaceholder(kind: SourceRecord['kind']): string {
+  switch (kind) {
+    case 'youtube':
+      return 'https://youtube.com/watch?v=...'
+    case 'local_file':
+      return '/path/to/reference-track.wav'
+    case 'upload':
+      return '/path/to/upload-staging/source.wav'
+  }
+}
+
+function getSourcePersistenceGuidance(kind: SourceRecord['kind']): string {
+  switch (kind) {
+    case 'youtube':
+      return 'YouTube sources persist a source_reference.url pointer during ingest.'
+    case 'local_file':
+      return 'Local file sources are copied into source_media/<filename> during ingest.'
+    case 'upload':
+      return 'Uploaded-file sources currently ingest from a local staging path and copy it into source_media/<filename>.'
+  }
+}
+
 function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
@@ -406,8 +428,9 @@ function App() {
             <div>
               <h2>Submit source</h2>
               <p className="muted">
-                Create a placeholder ingest job now; actual download and separation come next.
+                Queue ingest to persist source media into the project workspace before downstream processing.
               </p>
+              <p className="muted">{getSourcePersistenceGuidance(sourceKind)}</p>
             </div>
 
             <form className="stack-sm" onSubmit={handleSubmitSource}>
@@ -444,7 +467,7 @@ function App() {
                 <input
                   value={sourceValue}
                   onChange={(event) => setSourceValue(event.target.value)}
-                  placeholder="https://youtube.com/watch?v=..."
+                  placeholder={getSourceValuePlaceholder(sourceKind)}
                 />
               </label>
 

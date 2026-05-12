@@ -1,11 +1,37 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('songcraft baseline workflows', () => {
+  test('submit-source form updates persistence guidance for local-file ingest', async ({ page }) => {
+    await page.goto('/')
+
+    await expect(
+      page.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
+    ).toBeVisible()
+    await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', 'https://youtube.com/watch?v=...')
+
+    await page.getByLabel('Source type').selectOption('local_file')
+    await expect(
+      page.getByText('Local file sources are copied into source_media/<filename> during ingest.'),
+    ).toBeVisible()
+    await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', '/path/to/reference-track.wav')
+
+    await page.getByLabel('Source type').selectOption('upload')
+    await expect(
+      page.getByText('Uploaded-file sources currently ingest from a local staging path and copy it into source_media/<filename>.'),
+    ).toBeVisible()
+    await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', '/path/to/upload-staging/source.wav')
+  })
+
   test('happy path: ingest progresses from queued to completed', async ({ page }) => {
     const projectName = `E2E Happy Path ${Date.now()}`
     const sourceValue = `https://youtube.com/watch?v=happy${Date.now()}`
 
     await page.goto('/')
+
+    await expect(
+      page.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
+    ).toBeVisible()
+    await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', 'https://youtube.com/watch?v=...')
 
     await page.getByLabel('Project name').fill(projectName)
     await page.getByRole('button', { name: 'Create project' }).click()
@@ -38,6 +64,10 @@ test.describe('songcraft baseline workflows', () => {
     const sourceValue = `https://youtube.com/watch?v=fail${Date.now()}`
 
     await page.goto('/')
+
+    await expect(
+      page.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
+    ).toBeVisible()
 
     await page.getByLabel('Project name').fill(projectName)
     await page.getByRole('button', { name: 'Create project' }).click()

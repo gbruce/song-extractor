@@ -95,7 +95,7 @@ def test_queued_ingest_job_is_processed_automatically() -> None:
         assert latest_detail['sources'][0]['status'] == 'completed'
 
 
-def test_ingest_worker_writes_source_artifacts() -> None:
+def test_ingest_worker_writes_youtube_reference_artifacts() -> None:
     settings = get_settings()
     artifacts_root = settings.data_dir / 'projects'
 
@@ -125,19 +125,66 @@ def test_ingest_worker_writes_source_artifacts() -> None:
     source_dir = artifacts_root / project['id'] / source['id']
     manifest_path = source_dir / 'manifest.json'
     raw_source_path = source_dir / 'raw_source.txt'
+    source_reference_path = source_dir / 'source_reference.url'
 
     assert source_dir.exists()
     assert manifest_path.exists()
     assert raw_source_path.exists()
+    assert source_reference_path.exists()
 
     manifest = manifest_path.read_text(encoding='utf-8')
     raw_source = raw_source_path.read_text(encoding='utf-8')
+    source_reference = source_reference_path.read_text(encoding='utf-8')
 
     assert project['id'] in manifest
     assert source['id'] in manifest
     assert job['id'] in manifest
     assert 'artifact-ingest' in manifest
+    assert 'persisted_media_path' in manifest
+    assert 'source_reference.url' in manifest
     assert raw_source == 'https://youtube.com/watch?v=artifact-ingest'
+    assert source_reference == 'https://youtube.com/watch?v=artifact-ingest'
+
+
+def test_ingest_worker_copies_local_file_source_media(tmp_path: Path) -> None:
+    settings = get_settings()
+    artifacts_root = settings.data_dir / 'projects'
+    local_media_path = tmp_path / 'demo-source.wav'
+    local_media_path.write_bytes(b'fake-wave-data')
+
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Local File Artifact Track'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'local_file', 'value': str(local_media_path)},
+        ).json()
+        job = client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        ).json()
+
+        deadline = time.time() + 1.5
+        latest_detail = None
+        while time.time() < deadline:
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            if latest_detail['jobs'][0]['status'] == 'completed':
+                break
+            time.sleep(0.05)
+
+    assert latest_detail is not None
+    assert latest_detail['jobs'][0]['id'] == job['id']
+    assert latest_detail['jobs'][0]['status'] == 'completed'
+
+    source_dir = artifacts_root / project['id'] / source['id']
+    copied_media_path = source_dir / 'source_media' / 'demo-source.wav'
+    manifest_path = source_dir / 'manifest.json'
+
+    assert copied_media_path.exists()
+    assert copied_media_path.read_bytes() == b'fake-wave-data'
+    manifest = manifest_path.read_text(encoding='utf-8')
+    assert 'persisted_media_path' in manifest
+    assert 'source_media/demo-source.wav' in manifest
+    assert 'persisted_media_bytes' in manifest
 
 
 def test_non_ingest_jobs_are_not_processed_automatically() -> None:

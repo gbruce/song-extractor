@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+import shutil
 import threading
 from typing import TYPE_CHECKING
 
@@ -55,6 +56,8 @@ class IngestWorker:
         source_dir = self._data_dir / 'projects' / job['project_id'] / job['source_id']
         source_dir.mkdir(parents=True, exist_ok=True)
 
+        persisted_media_path, persisted_media_bytes = self._persist_source_media(source_dir=source_dir, source=source)
+
         manifest = {
             'project_id': job['project_id'],
             'source_id': job['source_id'],
@@ -64,6 +67,8 @@ class IngestWorker:
             'source_kind': source['kind'],
             'source_status': source_status,
             'source_value': source['value'],
+            'persisted_media_path': persisted_media_path,
+            'persisted_media_bytes': persisted_media_bytes,
             'job_created_at': persisted_job['created_at'],
             'job_updated_at': persisted_job['updated_at'],
             'source_created_at': source['created_at'],
@@ -74,6 +79,25 @@ class IngestWorker:
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')
         raw_source_path.write_text(source['value'], encoding='utf-8')
         self._logger.info('Wrote ingest artifacts for job %s to %s', job['id'], source_dir)
+
+    def _persist_source_media(self, *, source_dir: Path, source: dict[str, str]) -> tuple[str, int | None]:
+        if source['kind'] == 'youtube':
+            reference_path = source_dir / 'source_reference.url'
+            reference_path.write_text(source['value'], encoding='utf-8')
+            return ('source_reference.url', None)
+
+        if source['kind'] in {'local_file', 'upload'}:
+            original_path = Path(source['value'])
+            if not original_path.exists() or not original_path.is_file():
+                raise RuntimeError(f"Source media file does not exist: {original_path}")
+
+            media_dir = source_dir / 'source_media'
+            media_dir.mkdir(parents=True, exist_ok=True)
+            destination_path = media_dir / original_path.name
+            shutil.copy2(original_path, destination_path)
+            return (str(destination_path.relative_to(source_dir)), destination_path.stat().st_size)
+
+        raise RuntimeError(f"Unsupported source kind for ingest persistence: {source['kind']}")
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
