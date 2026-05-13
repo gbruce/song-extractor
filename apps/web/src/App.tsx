@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api } from './api'
-import type { JobRecord, ProjectDetail, ProjectSummary, RecentLogsResponse, SourceRecord } from './types'
+import type { JobRecord, ProjectDetail, ProjectSummary, RecentLogsResponse, SourceArtifactsResponse, SourceRecord } from './types'
 
 const apiBaseUrl = api.getApiBaseUrl()
 
@@ -117,6 +117,10 @@ function App() {
   const [sourceStatusSelections, setSourceStatusSelections] = useState<Record<string, SourceRecord['status']>>({})
   const [jobStatusSelections, setJobStatusSelections] = useState<Record<string, JobRecord['status']>>({})
   const [recentLogs, setRecentLogs] = useState<RecentLogsResponse>({ entries: [], total: 0 })
+  const [selectedArtifactSourceId, setSelectedArtifactSourceId] = useState('')
+  const [sourceArtifacts, setSourceArtifacts] = useState<SourceArtifactsResponse | null>(null)
+  const [artifactLoading, setArtifactLoading] = useState(false)
+  const [artifactError, setArtifactError] = useState('')
   const [logError, setLogError] = useState('')
   const [logsLoading, setLogsLoading] = useState(false)
   const [autoRefreshLogs, setAutoRefreshLogs] = useState(true)
@@ -160,6 +164,9 @@ function App() {
       setProjectDetail(null)
       setSourceStatusSelections({})
       setJobStatusSelections({})
+      setSelectedArtifactSourceId('')
+      setSourceArtifacts(null)
+      setArtifactError('')
       return
     }
 
@@ -360,6 +367,24 @@ function App() {
       setError(err instanceof Error ? err.message : 'Failed to update job status')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleInspectArtifacts(sourceId: string) {
+    if (!selectedProjectId) return
+
+    setArtifactLoading(true)
+    setArtifactError('')
+    setSelectedArtifactSourceId(sourceId)
+
+    try {
+      const artifacts = await api.getSourceArtifacts(selectedProjectId, sourceId)
+      setSourceArtifacts(artifacts)
+    } catch (err) {
+      setSourceArtifacts(null)
+      setArtifactError(err instanceof Error ? err.message : 'Failed to load source artifacts')
+    } finally {
+      setArtifactLoading(false)
     }
   }
 
@@ -614,6 +639,17 @@ function App() {
                             ) : (
                               <span className="muted">No further source transitions available.</span>
                             )}
+                            <div className="inline-actions">
+                              <button
+                                type="button"
+                                disabled={artifactLoading && selectedArtifactSourceId === source.id}
+                                onClick={() => handleInspectArtifacts(source.id)}
+                              >
+                                {artifactLoading && selectedArtifactSourceId === source.id
+                                  ? `Loading artifacts for source ${source.id}…`
+                                  : `Inspect artifacts for source ${source.id}`}
+                              </button>
+                            </div>
                           </div>
                         </li>
                       )
@@ -699,6 +735,45 @@ function App() {
                 )}
               </div>
             </div>
+          )}
+        </section>
+
+        <section className="panel stack-md">
+          <div className="stack-xs">
+            <h2>Source artifacts</h2>
+            <p className="muted">
+              Inspect persisted source and transcription artifacts created under the local project workspace.
+            </p>
+          </div>
+          {!selectedArtifactSourceId ? (
+            <p className="muted">Choose “Inspect artifacts” on a source to preview its saved files.</p>
+          ) : artifactLoading ? (
+            <p className="muted">Loading artifacts for source {selectedArtifactSourceId}…</p>
+          ) : artifactError ? (
+            <p className="error">{artifactError}</p>
+          ) : sourceArtifacts && sourceArtifacts.entries.length > 0 ? (
+            <div className="stack-sm">
+              <p className="muted">
+                Showing {sourceArtifacts.entries.length} artifacts for source {sourceArtifacts.source_id}
+              </p>
+              <ul className="list compact">
+                {sourceArtifacts.entries.map((entry) => (
+                  <li key={entry.path} className="list-row detail-card">
+                    <div className="stack-xs grow">
+                      <strong>{entry.path}</strong>
+                      <span className="muted">
+                        {entry.content_type} • {entry.size_bytes} bytes
+                      </span>
+                      <pre className="log-console" aria-label={`Artifact preview for ${entry.path}`}>
+                        {entry.preview}
+                      </pre>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="muted">No artifacts found for source {selectedArtifactSourceId}.</p>
           )}
         </section>
 

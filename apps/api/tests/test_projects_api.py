@@ -228,6 +228,57 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     assert 'transcribe' in transcript_json
 
 
+def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> None:
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Inspectable Artifact Track'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=inspectable-artifacts'},
+        ).json()
+        client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        ).json()
+
+        deadline = time.time() + 2.0
+        latest_detail = None
+        while time.time() < deadline:
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            if len(latest_detail['jobs']) == 2 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                break
+            time.sleep(0.05)
+
+        assert latest_detail is not None
+        assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe']
+
+        response = client.get(f"/api/projects/{project['id']}/sources/{source['id']}/artifacts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['project_id'] == project['id']
+    assert payload['source_id'] == source['id']
+    assert payload['entries']
+
+    entries_by_path = {entry['path']: entry for entry in payload['entries']}
+    assert set(entries_by_path) >= {
+        'manifest.json',
+        'raw_source.txt',
+        'source_reference.url',
+        'transcription/transcript.txt',
+        'transcription/transcript.json',
+    }
+
+    assert entries_by_path['manifest.json']['content_type'] == 'application/json'
+    assert 'inspectable-artifacts' in entries_by_path['manifest.json']['preview']
+    assert entries_by_path['raw_source.txt']['content_type'] == 'text/plain'
+    assert entries_by_path['raw_source.txt']['preview'] == 'https://youtube.com/watch?v=inspectable-artifacts'
+    assert entries_by_path['source_reference.url']['preview'] == 'https://youtube.com/watch?v=inspectable-artifacts'
+    assert entries_by_path['transcription/transcript.txt']['content_type'] == 'text/plain'
+    assert 'Transcript scaffold for source' in entries_by_path['transcription/transcript.txt']['preview']
+    assert entries_by_path['transcription/transcript.json']['content_type'] == 'application/json'
+    assert 'Placeholder transcript excerpt' in entries_by_path['transcription/transcript.json']['preview']
+
+
 def test_failed_ingest_does_not_queue_transcribe_job() -> None:
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': 'Failed Ingest Stops Pipeline'}).json()

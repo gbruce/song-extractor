@@ -6,6 +6,20 @@ type EventSourceMessageHandler = ((event: MessageEvent<string>) => void) | null
 
 type EventSourceErrorHandler = ((event: Event) => void) | null
 
+type SourceArtifactEntry = {
+  path: string
+  kind: 'file'
+  size_bytes: number
+  content_type: string
+  preview: string
+}
+
+type SourceArtifactsResponse = {
+  project_id: string
+  source_id: string
+  entries: SourceArtifactEntry[]
+}
+
 class MockEventSource {
   static instances: MockEventSource[] = []
 
@@ -48,6 +62,7 @@ vi.mock('./api', () => ({
     createJob: vi.fn(),
     updateSourceStatus: vi.fn(),
     updateJobStatus: vi.fn(),
+    getSourceArtifacts: vi.fn(),
     getRecentLogs: vi.fn(),
   },
 }))
@@ -103,6 +118,34 @@ const recentLogsResponse = {
   total: 2,
 }
 
+const sourceArtifactsResponse: SourceArtifactsResponse = {
+  project_id: 'proj_123',
+  source_id: 'src_123',
+  entries: [
+    {
+      path: 'manifest.json',
+      kind: 'file',
+      size_bytes: 412,
+      content_type: 'application/json',
+      preview: '{"source_value":"https://youtube.com/watch?v=demo123","persisted_media_path":"source_reference.url"}',
+    },
+    {
+      path: 'raw_source.txt',
+      kind: 'file',
+      size_bytes: 34,
+      content_type: 'text/plain',
+      preview: 'https://youtube.com/watch?v=demo123',
+    },
+    {
+      path: 'transcription/transcript.txt',
+      kind: 'file',
+      size_bytes: 146,
+      content_type: 'text/plain',
+      preview: 'Transcript scaffold for source src_123 from youtube input.',
+    },
+  ],
+}
+
 describe('App', () => {
   beforeEach(() => {
     vi.resetAllMocks()
@@ -123,6 +166,7 @@ describe('App', () => {
       status: 'running',
       updated_at: '2026-05-10T00:06:00Z',
     })
+    mockApi.getSourceArtifacts.mockResolvedValue(sourceArtifactsResponse)
     mockApi.getRecentLogs.mockResolvedValue(recentLogsResponse)
   })
 
@@ -256,6 +300,43 @@ describe('App', () => {
     })
 
     expect(await screen.findByText('Updated source src_123 to completed')).toBeInTheDocument()
+  })
+
+  it('loads and displays source artifact previews on demand', async () => {
+    const user = userEvent.setup()
+    mockApi.getProject.mockResolvedValue({
+      ...projectDetail,
+      sources: [
+        {
+          ...sourceRecord,
+          status: 'completed',
+          updated_at: '2026-05-10T00:10:00Z',
+        },
+      ],
+      jobs: [
+        {
+          ...projectDetail.jobs[0],
+          status: 'completed',
+          updated_at: '2026-05-10T00:07:00Z',
+        },
+        projectDetail.jobs[1],
+      ],
+    })
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Inspect artifacts for source src_123' }))
+
+    await waitFor(() => {
+      expect(mockApi.getSourceArtifacts).toHaveBeenCalledWith('proj_123', 'src_123')
+    })
+
+    expect(await screen.findByRole('heading', { name: 'Source artifacts' })).toBeInTheDocument()
+    expect(screen.getByText('manifest.json')).toBeInTheDocument()
+    expect(screen.getByText('application/json • 412 bytes')).toBeInTheDocument()
+    expect(screen.getByText('raw_source.txt')).toBeInTheDocument()
+    expect(screen.getByText('https://youtube.com/watch?v=demo123')).toBeInTheDocument()
+    expect(screen.getByText('transcription/transcript.txt')).toBeInTheDocument()
+    expect(screen.getByText('Transcript scaffold for source src_123 from youtube input.')).toBeInTheDocument()
   })
 
   it('renders a server log viewer and refreshes log entries on demand', async () => {

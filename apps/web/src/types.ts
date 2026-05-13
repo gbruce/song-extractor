@@ -36,3 +36,17 @@ export type RecentLogsResponse = {
   entries: string[]
   total: number
 }
+
+export type SourceArtifactEntry = {
+  path: string
+  kind: 'file'
+  size_bytes: number
+  content_type: string
+  preview: string
+}
+
+export type SourceArtifactsResponse = {
+  project_id: string
+  source_id: string
+  entries: SourceArtifactEntry[]
+}

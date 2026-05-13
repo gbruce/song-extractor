@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from pathlib import Path
 import sqlite3
 from uuid import uuid4
@@ -213,6 +214,40 @@ class SQLiteStore:
         if not manifest_path.exists():
             return None
         return json.loads(manifest_path.read_text(encoding='utf-8'))
+
+    def list_source_artifacts(self, *, project_id: str, source_id: str, data_dir: Path) -> dict[str, object] | None:
+        source = self.get_source(project_id=project_id, source_id=source_id)
+        if source is None:
+            return None
+
+        source_dir = Path(data_dir) / 'projects' / project_id / source_id
+        if not source_dir.exists() or not source_dir.is_dir():
+            return {
+                'project_id': project_id,
+                'source_id': source_id,
+                'entries': [],
+            }
+
+        entries: list[dict[str, object]] = []
+        for artifact_path in sorted(path for path in source_dir.rglob('*') if path.is_file()):
+            relative_path = artifact_path.relative_to(source_dir).as_posix()
+            content_type = mimetypes.guess_type(str(artifact_path))[0] or 'text/plain'
+            preview = artifact_path.read_text(encoding='utf-8')[:2000]
+            entries.append(
+                {
+                    'path': relative_path,
+                    'kind': 'file',
+                    'size_bytes': artifact_path.stat().st_size,
+                    'content_type': content_type,
+                    'preview': preview,
+                }
+            )
+
+        return {
+            'project_id': project_id,
+            'source_id': source_id,
+            'entries': entries,
+        }
 
     def has_job(self, project_id: str, source_id: str, job_type: str) -> bool:
         with self._connect() as connection:

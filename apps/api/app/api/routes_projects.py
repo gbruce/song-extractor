@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.schemas import JobCreate, JobRecord, JobStatusUpdate, ProjectCreate, ProjectDetail, ProjectSummary, SourceCreate, SourceRecord, SourceStatusUpdate
+from app.config import get_settings
+from app.schemas import JobCreate, JobRecord, JobStatusUpdate, ProjectCreate, ProjectDetail, ProjectSummary, SourceArtifactsResponse, SourceCreate, SourceRecord, SourceStatusUpdate
 from app.store import SQLiteStore
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -62,6 +63,21 @@ def update_source_status(
         )
 
     return source
+
+
+@router.get("/{project_id}/sources/{source_id}/artifacts")
+def list_source_artifacts(project_id: str, source_id: str, request: Request) -> SourceArtifactsResponse:
+    artifacts = get_store(request).list_source_artifacts(
+        project_id=project_id,
+        source_id=source_id,
+        data_dir=get_settings().data_dir,
+    )
+    if artifacts is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project or source not found",
+        )
+    return artifacts
 
 
 @router.get("/{project_id}/jobs")

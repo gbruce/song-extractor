@@ -55,3 +55,17 @@ class ProjectSummary(BaseModel):
 class ProjectDetail(ProjectSummary):
     sources: list[SourceRecord]
     jobs: list[JobRecord]
+
+
+class SourceArtifactEntry(BaseModel):
+    path: str
+    kind: str
+    size_bytes: int
+    content_type: str
+    preview: str
+
+
+class SourceArtifactsResponse(BaseModel):
+    project_id: str
+    source_id: str
+    entries: list[SourceArtifactEntry]

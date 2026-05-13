@@ -1,4 +1,4 @@
-import type { JobRecord, ProjectDetail, ProjectSummary, RecentLogsResponse, SourceRecord } from './types'
+import type { JobRecord, ProjectDetail, ProjectSummary, RecentLogsResponse, SourceArtifactsResponse, SourceRecord } from './types'
 
 function getDefaultApiBaseUrl(): string {
   const hostname = window.location.hostname || 'localhost'
@@ -67,6 +67,9 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     })
+  },
+  getSourceArtifacts(projectId: string, sourceId: string): Promise<SourceArtifactsResponse> {
+    return request<SourceArtifactsResponse>(`/api/projects/${projectId}/sources/${sourceId}/artifacts`)
   },
   getRecentLogs(limit = 50): Promise<RecentLogsResponse> {
     return request<RecentLogsResponse>(`/api/logs/recent?limit=${limit}`)
