@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sqlite3
 from uuid import uuid4
 
@@ -248,6 +248,35 @@ class SQLiteStore:
             'source_id': source_id,
             'entries': entries,
         }
+
+    def get_source_artifact_path(
+        self,
+        *,
+        project_id: str,
+        source_id: str,
+        artifact_path: str,
+        data_dir: Path,
+    ) -> Path | None:
+        source = self.get_source(project_id=project_id, source_id=source_id)
+        if source is None:
+            return None
+
+        source_dir = (Path(data_dir) / 'projects' / project_id / source_id).resolve()
+        if not source_dir.exists() or not source_dir.is_dir():
+            return None
+
+        normalized_relative_path = PurePosixPath('/' + artifact_path).as_posix().lstrip('/')
+        if not normalized_relative_path or normalized_relative_path in {'.', '..'}:
+            return None
+        if normalized_relative_path.startswith('../') or '/..' in normalized_relative_path.split('/'):
+            return None
+
+        candidate_path = (source_dir / Path(normalized_relative_path)).resolve()
+        if source_dir not in candidate_path.parents and candidate_path != source_dir:
+            return None
+        if not candidate_path.exists() or not candidate_path.is_file():
+            return None
+        return candidate_path
 
     def has_job(self, project_id: str, source_id: str, job_type: str) -> bool:
         with self._connect() as connection:

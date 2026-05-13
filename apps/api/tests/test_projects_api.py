@@ -279,6 +279,38 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     assert 'Placeholder transcript excerpt' in entries_by_path['transcription/transcript.json']['preview']
 
 
+
+def test_source_artifact_content_endpoint_returns_raw_file_bytes() -> None:
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Raw Artifact Access Track'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=raw-access'},
+        ).json()
+        client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        ).json()
+
+        deadline = time.time() + 2.0
+        latest_detail = None
+        while time.time() < deadline:
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            if len(latest_detail['jobs']) == 2 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                break
+            time.sleep(0.05)
+
+        assert latest_detail is not None
+
+        response = client.get(
+            f"/api/projects/{project['id']}/sources/{source['id']}/artifacts/raw_source.txt/content"
+        )
+
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('text/plain')
+    assert response.text == 'https://youtube.com/watch?v=raw-access'
+
+
 def test_failed_ingest_does_not_queue_transcribe_job() -> None:
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': 'Failed Ingest Stops Pipeline'}).json()

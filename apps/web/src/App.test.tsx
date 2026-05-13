@@ -63,6 +63,9 @@ vi.mock('./api', () => ({
     updateSourceStatus: vi.fn(),
     updateJobStatus: vi.fn(),
     getSourceArtifacts: vi.fn(),
+    getSourceArtifactContentUrl: vi.fn((projectId: string, sourceId: string, artifactPath: string) =>
+      `http://localhost:8000/api/projects/${projectId}/sources/${sourceId}/artifacts/${artifactPath}/content`,
+    ),
     getRecentLogs: vi.fn(),
   },
 }))
@@ -167,6 +170,10 @@ describe('App', () => {
       updated_at: '2026-05-10T00:06:00Z',
     })
     mockApi.getSourceArtifacts.mockResolvedValue(sourceArtifactsResponse)
+    mockApi.getSourceArtifactContentUrl.mockImplementation(
+      (projectId: string, sourceId: string, artifactPath: string) =>
+        `http://localhost:8000/api/projects/${projectId}/sources/${sourceId}/artifacts/${artifactPath}/content`,
+    )
     mockApi.getRecentLogs.mockResolvedValue(recentLogsResponse)
   })
 
@@ -337,6 +344,10 @@ describe('App', () => {
     expect(screen.getByText('https://youtube.com/watch?v=demo123')).toBeInTheDocument()
     expect(screen.getByText('transcription/transcript.txt')).toBeInTheDocument()
     expect(screen.getByText('Transcript scaffold for source src_123 from youtube input.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open raw artifact raw_source.txt' })).toHaveAttribute(
+      'href',
+      'http://localhost:8000/api/projects/proj_123/sources/src_123/artifacts/raw_source.txt/content',
+    )
   })
 
   it('renders a server log viewer and refreshes log entries on demand', async () => {

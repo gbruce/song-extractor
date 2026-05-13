@@ -71,6 +71,10 @@ export const api = {
   getSourceArtifacts(projectId: string, sourceId: string): Promise<SourceArtifactsResponse> {
     return request<SourceArtifactsResponse>(`/api/projects/${projectId}/sources/${sourceId}/artifacts`)
   },
+  getSourceArtifactContentUrl(projectId: string, sourceId: string, artifactPath: string): string {
+    const encodedPath = artifactPath.split('/').map(encodeURIComponent).join('/')
+    return `${API_BASE_URL}/api/projects/${projectId}/sources/${sourceId}/artifacts/${encodedPath}/content`
+  },
   getRecentLogs(limit = 50): Promise<RecentLogsResponse> {
     return request<RecentLogsResponse>(`/api/logs/recent?limit=${limit}`)
   },

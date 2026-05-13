@@ -764,6 +764,19 @@ function App() {
                       <span className="muted">
                         {entry.content_type} • {entry.size_bytes} bytes
                       </span>
+                      <div className="inline-actions">
+                        <a
+                          href={api.getSourceArtifactContentUrl(
+                            sourceArtifacts.project_id,
+                            sourceArtifacts.source_id,
+                            entry.path,
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open raw artifact {entry.path}
+                        </a>
+                      </div>
                       <pre className="log-console" aria-label={`Artifact preview for ${entry.path}`}>
                         {entry.preview}
                       </pre>

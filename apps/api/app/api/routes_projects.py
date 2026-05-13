@@ -1,4 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import FileResponse
+import mimetypes
 
 from app.config import get_settings
 from app.schemas import JobCreate, JobRecord, JobStatusUpdate, ProjectCreate, ProjectDetail, ProjectSummary, SourceArtifactsResponse, SourceCreate, SourceRecord, SourceStatusUpdate
@@ -78,6 +80,24 @@ def list_source_artifacts(project_id: str, source_id: str, request: Request) -> 
             detail="Project or source not found",
         )
     return artifacts
+
+
+@router.get("/{project_id}/sources/{source_id}/artifacts/{artifact_path:path}/content")
+def get_source_artifact_content(project_id: str, source_id: str, artifact_path: str, request: Request) -> FileResponse:
+    resolved_path = get_store(request).get_source_artifact_path(
+        project_id=project_id,
+        source_id=source_id,
+        artifact_path=artifact_path,
+        data_dir=get_settings().data_dir,
+    )
+    if resolved_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact not found",
+        )
+
+    media_type = mimetypes.guess_type(str(resolved_path))[0] or 'application/octet-stream'
+    return FileResponse(path=resolved_path, media_type=media_type, filename=resolved_path.name)
 
 
 @router.get("/{project_id}/jobs")

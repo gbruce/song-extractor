@@ -22,7 +22,7 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', '/path/to/upload-staging/source.wav')
   })
 
-  test('happy path: ingest auto-queues and completes transcribe after persistence', async ({ page }) => {
+  test('happy path: ingest auto-queues and completes transcribe after persistence', async ({ page, request }) => {
     const projectName = `E2E Happy Path ${Date.now()}`
     const sourceValue = `https://youtube.com/watch?v=happy${Date.now()}`
 
@@ -72,6 +72,14 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByText('transcription/transcript.json', { exact: true })).toBeVisible()
     await expect(page.getByLabel('Artifact preview for raw_source.txt')).toContainText('https://youtube.com/watch?v=happy')
     await expect(page.getByLabel('Artifact preview for transcription/transcript.txt')).toContainText('Transcript scaffold for source')
+
+    const rawArtifactLink = page.getByRole('link', { name: 'Open raw artifact raw_source.txt' })
+    await expect(rawArtifactLink).toBeVisible()
+    const rawArtifactHref = await rawArtifactLink.getAttribute('href')
+    expect(rawArtifactHref).toBeTruthy()
+    const rawArtifactResponse = await request.get(rawArtifactHref!)
+    expect(rawArtifactResponse.ok()).toBeTruthy()
+    await expect(rawArtifactResponse.text()).resolves.toContain('https://youtube.com/watch?v=happy')
   })
 
   test('failure recovery path: failed ingest unlocks manual source recovery', async ({ page }) => {
