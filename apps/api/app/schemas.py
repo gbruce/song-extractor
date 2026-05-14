@@ -62,7 +62,7 @@ class SourceArtifactEntry(BaseModel):
     kind: str
     size_bytes: int
     content_type: str
-    preview: str
+    preview: str | None
 
 
 class SourceArtifactsResponse(BaseModel):

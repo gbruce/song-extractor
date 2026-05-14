@@ -231,8 +231,25 @@ class SQLiteStore:
         entries: list[dict[str, object]] = []
         for artifact_path in sorted(path for path in source_dir.rglob('*') if path.is_file()):
             relative_path = artifact_path.relative_to(source_dir).as_posix()
-            content_type = mimetypes.guess_type(str(artifact_path))[0] or 'text/plain'
-            preview = artifact_path.read_text(encoding='utf-8')[:2000]
+            content_type = mimetypes.guess_type(str(artifact_path))[0] or 'application/octet-stream'
+            preview: str | None = None
+            artifact_bytes = artifact_path.read_bytes()
+            is_known_text_type = content_type.startswith('text/') or content_type in {
+                'application/json',
+                'application/xml',
+                'application/javascript',
+            }
+            if is_known_text_type:
+                preview = artifact_bytes.decode(encoding='utf-8')[:2000]
+            else:
+                has_nul_byte = b'\x00' in artifact_bytes
+                if not has_nul_byte:
+                    try:
+                        decoded_preview = artifact_bytes.decode(encoding='utf-8')
+                    except UnicodeDecodeError:
+                        decoded_preview = None
+                    if decoded_preview is not None:
+                        preview = decoded_preview[:2000]
             entries.append(
                 {
                     'path': relative_path,

@@ -778,7 +778,7 @@ function App() {
                         </a>
                       </div>
                       <pre className="log-console" aria-label={`Artifact preview for ${entry.path}`}>
-                        {entry.preview}
+                        {entry.preview ?? 'Binary artifact preview unavailable. Open the raw artifact to inspect its contents.'}
                       </pre>
                     </div>
                   </li>

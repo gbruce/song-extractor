@@ -42,7 +42,7 @@ export type SourceArtifactEntry = {
   kind: 'file'
   size_bytes: number
   content_type: string
-  preview: string
+  preview: string | null
 }
 
 export type SourceArtifactsResponse = {

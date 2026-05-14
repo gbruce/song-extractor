@@ -11,7 +11,7 @@ type SourceArtifactEntry = {
   kind: 'file'
   size_bytes: number
   content_type: string
-  preview: string
+  preview: string | null
 }
 
 type SourceArtifactsResponse = {
@@ -145,6 +145,13 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       size_bytes: 146,
       content_type: 'text/plain',
       preview: 'Transcript scaffold for source src_123 from youtube input.',
+    },
+    {
+      path: 'source_media/demo-source.wav',
+      kind: 'file',
+      size_bytes: 32,
+      content_type: 'audio/x-wav',
+      preview: null,
     },
   ],
 }
@@ -344,6 +351,9 @@ describe('App', () => {
     expect(screen.getByText('https://youtube.com/watch?v=demo123')).toBeInTheDocument()
     expect(screen.getByText('transcription/transcript.txt')).toBeInTheDocument()
     expect(screen.getByText('Transcript scaffold for source src_123 from youtube input.')).toBeInTheDocument()
+    expect(screen.getByText('source_media/demo-source.wav')).toBeInTheDocument()
+    expect(screen.getByText('audio/x-wav • 32 bytes')).toBeInTheDocument()
+    expect(screen.getByText('Binary artifact preview unavailable. Open the raw artifact to inspect its contents.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open raw artifact raw_source.txt' })).toHaveAttribute(
       'href',
       'http://localhost:8000/api/projects/proj_123/sources/src_123/artifacts/raw_source.txt/content',
