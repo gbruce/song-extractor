@@ -77,10 +77,10 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByText('Origin: transcribe_worker', { exact: false })).toHaveCount(2)
     await expect(page.getByText('Stage: separate • Role: stems_manifest')).toBeVisible()
     await expect(page.getByText('Origin: separate_worker', { exact: false })).toHaveCount(3)
-    await expect(page.getByText('Origin: submitted_source', { exact: false })).toHaveCount(2)
+    await expect(page.getByText('Origin: submitted_source', { exact: false })).toHaveCount(3)
     await expect(page.getByLabel('Artifact preview for separation/stems.json')).toContainText('vocals')
     await expect(page.getByLabel('Artifact preview for raw_source.txt')).toContainText('https://youtube.com/watch?v=happy')
-    await expect(page.getByLabel('Artifact preview for transcription/transcript.txt')).toContainText('Transcript scaffold for source')
+    await expect(page.getByLabel('Artifact preview for transcription/transcript.txt')).toContainText('This transcript was generated from persisted media using the real transcription backend.')
 
     const rawArtifactLink = page.getByRole('link', { name: 'Open raw artifact raw_source.txt' })
     await expect(rawArtifactLink).toBeVisible()

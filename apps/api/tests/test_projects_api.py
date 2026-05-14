@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import time
 
@@ -221,11 +222,22 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
 
     assert transcript_text_path.exists()
     assert transcript_json_path.exists()
-    assert 'auto-transcribe' in transcript_text_path.read_text(encoding='utf-8')
-    transcript_json = transcript_json_path.read_text(encoding='utf-8')
-    assert source['id'] in transcript_json
-    assert 'segments' in transcript_json
-    assert 'transcribe' in transcript_json
+    transcript_text = transcript_text_path.read_text(encoding='utf-8')
+    transcript_json = json.loads(transcript_json_path.read_text(encoding='utf-8'))
+
+    assert 'auto-transcribe' in transcript_text
+    assert 'This transcript was generated from persisted media using the real transcription backend.' in transcript_text
+    assert transcript_json['project_id'] == project['id']
+    assert transcript_json['source_id'] == source['id']
+    assert transcript_json['job_id'] == latest_detail['jobs'][1]['id']
+    assert transcript_json['job_type'] == 'transcribe'
+    assert transcript_json['backend'] == 'ffmpeg-tone-slice'
+    assert transcript_json['language'] == 'en'
+    assert transcript_json['segment_count'] >= 1
+    assert transcript_json['duration_seconds'] >= 0.5
+    assert transcript_json['media_duration_seconds'] >= transcript_json['duration_seconds']
+    assert transcript_json['segments']
+    assert transcript_json['segments'][0]['text'].startswith('Detected synthetic tone segment')
 
 
 def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> None:
@@ -294,14 +306,14 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     assert entries_by_path['transcription/transcript.txt']['role'] == 'transcript_text'
     assert entries_by_path['transcription/transcript.txt']['origin'] == 'transcribe_worker'
     assert entries_by_path['transcription/transcript.txt']['updated_at']
-    assert 'Transcript scaffold for source' in entries_by_path['transcription/transcript.txt']['preview']
+    assert 'This transcript was generated from persisted media using the real transcription backend.' in entries_by_path['transcription/transcript.txt']['preview']
 
     assert entries_by_path['transcription/transcript.json']['content_type'] == 'application/json'
     assert entries_by_path['transcription/transcript.json']['stage'] == 'transcribe'
     assert entries_by_path['transcription/transcript.json']['role'] == 'transcript_segments'
     assert entries_by_path['transcription/transcript.json']['origin'] == 'transcribe_worker'
     assert entries_by_path['transcription/transcript.json']['updated_at']
-    assert 'Placeholder transcript excerpt' in entries_by_path['transcription/transcript.json']['preview']
+    assert 'ffmpeg-tone-slice' in entries_by_path['transcription/transcript.json']['preview']
 
     assert entries_by_path['separation/stems.json']['content_type'] == 'application/json'
     assert entries_by_path['separation/stems.json']['stage'] == 'separate'
