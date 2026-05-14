@@ -231,13 +231,13 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     assert transcript_json['source_id'] == source['id']
     assert transcript_json['job_id'] == latest_detail['jobs'][1]['id']
     assert transcript_json['job_type'] == 'transcribe'
-    assert transcript_json['backend'] == 'ffmpeg-tone-slice'
+    assert transcript_json['backend'] == 'faster-whisper'
     assert transcript_json['language'] == 'en'
     assert transcript_json['segment_count'] >= 1
     assert transcript_json['duration_seconds'] >= 0.5
     assert transcript_json['media_duration_seconds'] >= transcript_json['duration_seconds']
     assert transcript_json['segments']
-    assert transcript_json['segments'][0]['text'].startswith('Detected synthetic tone segment')
+    assert 'scribe reference' in transcript_json['segments'][0]['text'].lower()
 
 
 def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> None:
@@ -313,7 +313,7 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     assert entries_by_path['transcription/transcript.json']['role'] == 'transcript_segments'
     assert entries_by_path['transcription/transcript.json']['origin'] == 'transcribe_worker'
     assert entries_by_path['transcription/transcript.json']['updated_at']
-    assert 'ffmpeg-tone-slice' in entries_by_path['transcription/transcript.json']['preview']
+    assert 'faster-whisper' in entries_by_path['transcription/transcript.json']['preview']
 
     assert entries_by_path['separation/stems.json']['content_type'] == 'application/json'
     assert entries_by_path['separation/stems.json']['stage'] == 'separate'

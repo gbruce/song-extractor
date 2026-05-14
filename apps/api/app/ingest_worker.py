@@ -5,11 +5,11 @@ import logging
 import math
 from pathlib import Path
 import shutil
-import struct
 import subprocess
 import threading
-import wave
 from typing import TYPE_CHECKING
+
+from faster_whisper import WhisperModel
 
 if TYPE_CHECKING:
     from app.store import SQLiteStore
@@ -31,6 +31,7 @@ class IngestWorker:
         self._processing_delay_seconds = processing_delay_seconds
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._whisper_model: WhisperModel | None = None
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -111,38 +112,80 @@ class IngestWorker:
         media_dir.mkdir(parents=True, exist_ok=True)
         media_path = media_dir / 'reference-tone.wav'
 
+        speech_prompt = 'songcraft auto transcribe reference'
+        try:
+            subprocess.run(
+                [
+                    'ffmpeg',
+                    '-hide_banner',
+                    '-loglevel',
+                    'error',
+                    '-f',
+                    'lavfi',
+                    '-i',
+                    f"flite=text='{speech_prompt}':voice=slt",
+                    '-t',
+                    '3',
+                    str(media_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            return media_path
+        except Exception as exc:
+            self._logger.warning('Falling back to tone reference media for %s: %s', source['id'], exc)
+
         sample_rate = 16000
         amplitude = 12000
         source_hash = sum(ord(char) for char in source['value'])
         tone_a = 440 + (source_hash % 120)
         tone_b = 660 + (source_hash % 160)
-        segments = [
-            ('tone', 0.70, tone_a),
-            ('silence', 0.22, 0),
-            ('tone', 0.82, tone_b),
+
+        pcm_path = media_dir / 'reference-tone-fallback.pcm'
+        samples_per_segment = [
+            ('tone', int(sample_rate * 0.70), tone_a),
+            ('silence', int(sample_rate * 0.22), 0),
+            ('tone', int(sample_rate * 0.82), tone_b),
         ]
+        pcm_bytes = bytearray()
+        for segment_type, total_frames, frequency in samples_per_segment:
+            for frame_index in range(total_frames):
+                if segment_type == 'silence':
+                    sample_value = 0
+                else:
+                    sample_value = int(amplitude * math.sin(2 * math.pi * frequency * frame_index / sample_rate))
+                pcm_bytes.extend(int(sample_value).to_bytes(2, byteorder='little', signed=True))
+        pcm_path.write_bytes(bytes(pcm_bytes))
 
-        with wave.open(str(media_path), 'wb') as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(sample_rate)
-
-            for segment_type, duration_seconds, frequency in segments:
-                total_frames = int(sample_rate * duration_seconds)
-                frames = bytearray()
-                for frame_index in range(total_frames):
-                    if segment_type == 'silence':
-                        sample_value = 0
-                    else:
-                        sample_value = int(
-                            amplitude * math.sin(2 * math.pi * frequency * frame_index / sample_rate)
-                        )
-                    frames.extend(struct.pack('<h', sample_value))
-                wav_file.writeframes(bytes(frames))
+        subprocess.run(
+            [
+                'ffmpeg',
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-f',
+                's16le',
+                '-ar',
+                str(sample_rate),
+                '-ac',
+                '1',
+                '-i',
+                str(pcm_path),
+                str(media_path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        pcm_path.unlink(missing_ok=True)
 
         return media_path
 
-    def _decode_media_to_pcm(self, media_path: Path) -> tuple[bytes, int, float]:
+    def _get_whisper_model(self) -> WhisperModel:
+        if self._whisper_model is None:
+            self._whisper_model = WhisperModel('tiny.en', device='cpu', compute_type='int8')
+        return self._whisper_model
+
+    def _probe_media_duration(self, media_path: Path) -> float:
         ffprobe_result = subprocess.run(
             [
                 'ffprobe',
@@ -158,67 +201,23 @@ class IngestWorker:
             capture_output=True,
             text=True,
         )
-        media_duration_seconds = float(ffprobe_result.stdout.strip() or '0')
-
-        sample_rate = 16000
-        ffmpeg_result = subprocess.run(
-            [
-                'ffmpeg',
-                '-hide_banner',
-                '-loglevel',
-                'error',
-                '-i',
-                str(media_path),
-                '-f',
-                's16le',
-                '-ac',
-                '1',
-                '-ar',
-                str(sample_rate),
-                'pipe:1',
-            ],
-            check=True,
-            capture_output=True,
-        )
-        return (ffmpeg_result.stdout, sample_rate, media_duration_seconds)
+        return float(ffprobe_result.stdout.strip() or '0')
 
     def _transcribe_media(self, *, media_path: Path, source: dict[str, str], job: dict[str, str]) -> tuple[str, dict[str, object]]:
-        backend_name = 'ffmpeg-tone-slice'
+        backend_name = 'faster-whisper'
 
         try:
-            pcm_bytes, sample_rate, media_duration_seconds = self._decode_media_to_pcm(media_path)
-            if not pcm_bytes:
-                raise RuntimeError('No audio samples decoded from media')
-
-            samples = struct.unpack('<' + 'h' * (len(pcm_bytes) // 2), pcm_bytes)
-            window_size = max(1, int(sample_rate * 0.20))
-            threshold = 1500
-            active_windows: list[tuple[float, float]] = []
-            current_start: float | None = None
-
-            for window_start in range(0, len(samples), window_size):
-                window = samples[window_start : window_start + window_size]
-                window_energy = max(abs(sample) for sample in window) if window else 0
-                start_seconds = window_start / sample_rate
-                end_seconds = min(len(samples), window_start + window_size) / sample_rate
-
-                if window_energy >= threshold:
-                    if current_start is None:
-                        current_start = start_seconds
-                elif current_start is not None:
-                    active_windows.append((current_start, end_seconds))
-                    current_start = None
-
-            if current_start is not None:
-                active_windows.append((current_start, len(samples) / sample_rate))
-
+            media_duration_seconds = self._probe_media_duration(media_path)
+            model = self._get_whisper_model()
+            raw_segments, info = model.transcribe(str(media_path), language='en', vad_filter=True)
             segments = [
                 {
-                    'start_seconds': round(start_seconds, 2),
-                    'end_seconds': round(end_seconds, 2),
-                    'text': f'Detected synthetic tone segment {index} from {start_seconds:.2f}s to {end_seconds:.2f}s.',
+                    'start_seconds': round(segment.start, 2),
+                    'end_seconds': round(segment.end, 2),
+                    'text': segment.text.strip(),
                 }
-                for index, (start_seconds, end_seconds) in enumerate(active_windows, start=1)
+                for segment in raw_segments
+                if segment.text.strip()
             ]
 
             if not segments:
@@ -226,14 +225,12 @@ class IngestWorker:
                     {
                         'start_seconds': 0.0,
                         'end_seconds': round(max(media_duration_seconds, 0.5), 2),
-                        'text': 'Decoded persisted media but detected no high-energy speech-like segments.',
+                        'text': 'Whisper decoded the media but returned no speech segments.',
                     }
                 ]
 
-            duration_seconds = round(
-                sum(segment['end_seconds'] - segment['start_seconds'] for segment in segments),
-                2,
-            )
+            duration_seconds = round(sum(segment['end_seconds'] - segment['start_seconds'] for segment in segments), 2)
+            detected_language = getattr(info, 'language', 'en') or 'en'
         except Exception as exc:
             self._logger.warning('Real transcription backend fallback for %s: %s', media_path, exc)
             media_duration_seconds = 0.5
@@ -241,10 +238,11 @@ class IngestWorker:
                 {
                     'start_seconds': 0.0,
                     'end_seconds': 0.5,
-                    'text': f'Unable to decode persisted media {media_path.name}; generated metadata-only transcript.',
+                    'text': f'Unable to transcribe persisted media {media_path.name} with faster-whisper; generated metadata-only transcript.',
                 }
             ]
             duration_seconds = 0.5
+            detected_language = 'en'
 
         transcript_lines = [
             f"Transcript for source {source['id']} from {source['kind']} input.",
@@ -261,7 +259,7 @@ class IngestWorker:
             'job_id': job['id'],
             'job_type': job['job_type'],
             'backend': backend_name,
-            'language': 'en',
+            'language': detected_language,
             'source_kind': source['kind'],
             'source_value': source['value'],
             'persisted_media_path': str(media_path.relative_to(self._data_dir / 'projects' / job['project_id'] / job['source_id'])),

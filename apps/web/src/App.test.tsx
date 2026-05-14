@@ -169,7 +169,7 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       role: 'transcript_text',
       origin: 'transcribe_worker',
       updated_at: '2026-05-10T00:09:00Z',
-      preview: 'Transcript scaffold for source src_123 from youtube input.',
+      preview: 'Transcript for source src_123 from youtube input.\nThis transcript was generated from persisted media using the real transcription backend.\nSongcraft.au and scribe reference.',
     },
     {
       path: 'separation/stems.json',
@@ -393,7 +393,9 @@ describe('App', () => {
     expect(screen.getByText('raw_source.txt')).toBeInTheDocument()
     expect(screen.getByText('https://youtube.com/watch?v=demo123')).toBeInTheDocument()
     expect(screen.getByText('transcription/transcript.txt')).toBeInTheDocument()
-    expect(screen.getByText('Transcript scaffold for source src_123 from youtube input.')).toBeInTheDocument()
+    expect(screen.getByText(/Transcript for source src_123 from youtube input\./)).toBeInTheDocument()
+    expect(screen.getByText(/This transcript was generated from persisted media using the real transcription backend\./)).toBeInTheDocument()
+    expect(screen.getByText(/Songcraft\.au and scribe reference\./)).toBeInTheDocument()
     expect(screen.getByText('Stage: transcribe • Role: transcript_text')).toBeInTheDocument()
     expect(screen.getByText('Origin: transcribe_worker • Updated: 2026-05-10T00:09:00Z')).toBeInTheDocument()
     expect(screen.getByText('separation/stems.json')).toBeInTheDocument()
