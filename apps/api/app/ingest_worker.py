@@ -143,6 +143,48 @@ class IngestWorker:
         )
         self._logger.info('Wrote transcription artifacts for job %s to %s', job['id'], transcription_dir)
 
+    def _write_separation_artifacts(self, job: dict[str, str], source: dict[str, str]) -> None:
+        source_dir = self._data_dir / 'projects' / job['project_id'] / job['source_id']
+        source_dir.mkdir(parents=True, exist_ok=True)
+        separation_dir = source_dir / 'separation'
+        separation_dir.mkdir(parents=True, exist_ok=True)
+
+        transcript_artifact = self._store.get_source_artifact_path(
+            project_id=job['project_id'],
+            source_id=job['source_id'],
+            artifact_path='transcription/transcript.json',
+            data_dir=self._data_dir,
+        )
+        if transcript_artifact is None:
+            raise RuntimeError('Missing transcription artifact while writing separation artifacts')
+
+        stems_payload = {
+            'project_id': job['project_id'],
+            'source_id': job['source_id'],
+            'job_id': job['id'],
+            'job_type': job['job_type'],
+            'based_on': 'transcription/transcript.json',
+            'source_value': source['value'],
+            'stems': [
+                {'name': 'vocals', 'status': 'ready', 'path': 'separation/vocals.txt'},
+                {'name': 'instrumental', 'status': 'ready', 'path': 'separation/instrumental.txt'},
+            ],
+        }
+
+        (separation_dir / 'stems.json').write_text(
+            json.dumps(stems_payload, indent=2, sort_keys=True),
+            encoding='utf-8',
+        )
+        (separation_dir / 'vocals.txt').write_text(
+            f"Placeholder separated vocals preview for source {source['id']}.\n",
+            encoding='utf-8',
+        )
+        (separation_dir / 'instrumental.txt').write_text(
+            f"Placeholder separated instrumental preview for source {source['id']}.\n",
+            encoding='utf-8',
+        )
+        self._logger.info('Wrote separation artifacts for job %s to %s', job['id'], separation_dir)
+
     def _process_transcribe_job(self, job: dict[str, str]) -> None:
         self._logger.info('Processing transcribe job %s for source %s', job['id'], job['source_id'])
         if self._stop_event.wait(self._processing_delay_seconds):
@@ -162,6 +204,31 @@ class IngestWorker:
         )
         if completed_job is not None:
             self._logger.info('Completed transcribe job %s', completed_job['id'])
+
+        separate_job = self._store.maybe_queue_separate_job(
+            project_id=job['project_id'],
+            source_id=job['source_id'],
+            data_dir=self._data_dir,
+        )
+        if separate_job is None:
+            return
+
+        self._logger.info('Queued separate job %s after transcribe job %s', separate_job['id'], job['id'])
+        running_separate_job = self._store.update_job_status(
+            project_id=separate_job['project_id'],
+            job_id=separate_job['id'],
+            status='running',
+        )
+        if running_separate_job is None:
+            raise RuntimeError('Failed to transition queued separate job to running')
+        self._write_separation_artifacts(running_separate_job, source)
+        completed_separate_job = self._store.update_job_status(
+            project_id=running_separate_job['project_id'],
+            job_id=running_separate_job['id'],
+            status='completed',
+        )
+        if completed_separate_job is not None:
+            self._logger.info('Completed separate job %s', completed_separate_job['id'])
 
     def _process_ingest_job(self, job: dict[str, str]) -> None:
         self._logger.info('Processing ingest job %s for source %s', job['id'], job['source_id'])

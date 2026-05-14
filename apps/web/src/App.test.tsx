@@ -117,6 +117,15 @@ const projectDetail: ProjectDetail = {
       created_at: '2026-05-10T00:07:00Z',
       updated_at: '2026-05-10T00:09:00Z',
     },
+    {
+      id: 'job_789',
+      project_id: 'proj_123',
+      source_id: 'src_123',
+      job_type: 'separate',
+      status: 'completed',
+      created_at: '2026-05-10T00:10:00Z',
+      updated_at: '2026-05-10T00:11:00Z',
+    },
   ],
 }
 
@@ -161,6 +170,17 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       origin: 'transcribe_worker',
       updated_at: '2026-05-10T00:09:00Z',
       preview: 'Transcript scaffold for source src_123 from youtube input.',
+    },
+    {
+      path: 'separation/stems.json',
+      kind: 'file',
+      size_bytes: 228,
+      content_type: 'application/json',
+      stage: 'separate',
+      role: 'stems_manifest',
+      origin: 'separate_worker',
+      updated_at: '2026-05-10T00:11:00Z',
+      preview: '{"stems":[{"name":"vocals","status":"ready"},{"name":"instrumental","status":"ready"}]}',
     },
     {
       path: 'source_media/demo-source.wav',
@@ -220,22 +240,22 @@ describe('App', () => {
   it('renders lifecycle badges and guidance for active and terminal jobs', async () => {
     render(<App />)
 
-    expect(await screen.findByText('2 jobs total')).toBeInTheDocument()
+    expect(await screen.findByText('3 jobs total')).toBeInTheDocument()
     expect(screen.getByText('1 active')).toBeInTheDocument()
-    expect(screen.getByText('1 done')).toBeInTheDocument()
+    expect(screen.getByText('2 done')).toBeInTheDocument()
     expect(screen.getByText('Queued • waiting to start')).toBeInTheDocument()
-    expect(screen.getByText('Completed • no further action')).toBeInTheDocument()
+    expect(screen.getAllByText('Completed • no further action')).toHaveLength(2)
     expect(screen.getByText('Next transitions: running, failed')).toBeInTheDocument()
-    expect(screen.getByText('No further transitions available.')).toBeInTheDocument()
+    expect(screen.getAllByText('No further transitions available.')).toHaveLength(2)
   })
 
   it('renders source status badges, linked job summaries, and ingest sync guidance', async () => {
     render(<App />)
 
     expect(await screen.findByText('Submitted • awaiting processing')).toBeInTheDocument()
-    expect(screen.getByText('2 linked jobs')).toBeInTheDocument()
-    expect(screen.getByText('1 active • 1 done • 0 failed')).toBeInTheDocument()
-    expect(screen.getByText('Latest job update: 2026-05-10T00:09:00Z')).toBeInTheDocument()
+    expect(screen.getByText('3 linked jobs')).toBeInTheDocument()
+    expect(screen.getByText('1 active • 2 done • 0 failed')).toBeInTheDocument()
+    expect(screen.getByText('Latest job update: 2026-05-10T00:11:00Z')).toBeInTheDocument()
     expect(screen.getByText('Ingest jobs drive source status automatically.')).toBeInTheDocument()
     expect(
       screen.getByText('Use the job controls below for normal pipeline progress; only use source controls as a manual override.'),
@@ -354,6 +374,7 @@ describe('App', () => {
           updated_at: '2026-05-10T00:07:00Z',
         },
         projectDetail.jobs[1],
+        projectDetail.jobs[2],
       ],
     })
     render(<App />)
@@ -375,6 +396,10 @@ describe('App', () => {
     expect(screen.getByText('Transcript scaffold for source src_123 from youtube input.')).toBeInTheDocument()
     expect(screen.getByText('Stage: transcribe • Role: transcript_text')).toBeInTheDocument()
     expect(screen.getByText('Origin: transcribe_worker • Updated: 2026-05-10T00:09:00Z')).toBeInTheDocument()
+    expect(screen.getByText('separation/stems.json')).toBeInTheDocument()
+    expect(screen.getByText('Stage: separate • Role: stems_manifest')).toBeInTheDocument()
+    expect(screen.getByText('Origin: separate_worker • Updated: 2026-05-10T00:11:00Z')).toBeInTheDocument()
+    expect(screen.getByText('{"stems":[{"name":"vocals","status":"ready"},{"name":"instrumental","status":"ready"}]}')).toBeInTheDocument()
     expect(screen.getByText('source_media/demo-source.wav')).toBeInTheDocument()
     expect(screen.getByText('audio/x-wav • 32 bytes')).toBeInTheDocument()
     expect(screen.getByText('Stage: ingest • Role: source_media')).toBeInTheDocument()

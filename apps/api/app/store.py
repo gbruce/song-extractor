@@ -279,6 +279,8 @@ class SQLiteStore:
     def _infer_artifact_stage(self, relative_path: str) -> str:
         if relative_path.startswith('transcription/'):
             return 'transcribe'
+        if relative_path.startswith('separation/'):
+            return 'separate'
         return 'ingest'
 
     def _infer_artifact_role(self, relative_path: str) -> str:
@@ -288,11 +290,14 @@ class SQLiteStore:
             'source_reference.url': 'source_reference',
             'transcription/transcript.txt': 'transcript_text',
             'transcription/transcript.json': 'transcript_segments',
+            'separation/stems.json': 'stems_manifest',
         }
         if relative_path in role_map:
             return role_map[relative_path]
         if relative_path.startswith('source_media/'):
             return 'source_media'
+        if relative_path.startswith('separation/'):
+            return 'stem_preview'
         return 'artifact'
 
     def _infer_artifact_origin(self, *, stage: str, role: str) -> str:
@@ -300,6 +305,8 @@ class SQLiteStore:
             return 'submitted_source'
         if stage == 'transcribe':
             return 'transcribe_worker'
+        if stage == 'separate':
+            return 'separate_worker'
         return 'ingest_worker'
 
     def get_source_artifact_path(
@@ -362,6 +369,39 @@ class SQLiteStore:
             return None
 
         return self.add_job(project_id=project_id, source_id=source_id, job_type='transcribe')
+
+    def maybe_queue_separate_job(self, *, project_id: str, source_id: str, data_dir: Path) -> dict[str, str] | None:
+        source = self.get_source(project_id=project_id, source_id=source_id)
+        if source is None or source['status'] not in FINAL_SOURCE_STATUSES:
+            return None
+        if source['status'] != 'completed':
+            return None
+        if self.has_job(project_id=project_id, source_id=source_id, job_type='separate'):
+            return None
+
+        transcript_artifact = self.get_source_artifact_path(
+            project_id=project_id,
+            source_id=source_id,
+            artifact_path='transcription/transcript.json',
+            data_dir=data_dir,
+        )
+        if transcript_artifact is None:
+            return None
+
+        with self._connect() as connection:
+            completed_transcribe_job = connection.execute(
+                """
+                SELECT 1
+                FROM jobs
+                WHERE project_id = ? AND source_id = ? AND job_type = 'transcribe' AND status = 'completed'
+                LIMIT 1
+                """,
+                (project_id, source_id),
+            ).fetchone()
+        if completed_transcribe_job is None:
+            return None
+
+        return self.add_job(project_id=project_id, source_id=source_id, job_type='separate')
 
     def add_job(self, project_id: str, source_id: str, job_type: str) -> dict[str, str] | None:
         if self._project_summary(project_id) is None:

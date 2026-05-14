@@ -206,12 +206,12 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
         latest_detail = None
         while time.time() < deadline:
             latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if len(latest_detail['jobs']) == 2 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+            if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
                 break
             time.sleep(0.05)
 
     assert latest_detail is not None
-    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe']
+    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
     assert latest_detail['jobs'][0]['id'] == job['id']
     assert all(item['status'] == 'completed' for item in latest_detail['jobs'])
 
@@ -244,12 +244,12 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
         latest_detail = None
         while time.time() < deadline:
             latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if len(latest_detail['jobs']) == 2 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+            if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
                 break
             time.sleep(0.05)
 
         assert latest_detail is not None
-        assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe']
+        assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
 
         response = client.get(f"/api/projects/{project['id']}/sources/{source['id']}/artifacts")
 
@@ -266,6 +266,7 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
         'source_reference.url',
         'transcription/transcript.txt',
         'transcription/transcript.json',
+        'separation/stems.json',
     }
 
     assert entries_by_path['manifest.json']['content_type'] == 'application/json'
@@ -302,6 +303,13 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     assert entries_by_path['transcription/transcript.json']['updated_at']
     assert 'Placeholder transcript excerpt' in entries_by_path['transcription/transcript.json']['preview']
 
+    assert entries_by_path['separation/stems.json']['content_type'] == 'application/json'
+    assert entries_by_path['separation/stems.json']['stage'] == 'separate'
+    assert entries_by_path['separation/stems.json']['role'] == 'stems_manifest'
+    assert entries_by_path['separation/stems.json']['origin'] == 'separate_worker'
+    assert entries_by_path['separation/stems.json']['updated_at']
+    assert 'vocals' in entries_by_path['separation/stems.json']['preview']
+
 
 
 def test_source_artifact_content_endpoint_returns_raw_file_bytes() -> None:
@@ -320,7 +328,7 @@ def test_source_artifact_content_endpoint_returns_raw_file_bytes() -> None:
         latest_detail = None
         while time.time() < deadline:
             latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if len(latest_detail['jobs']) == 2 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+            if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
                 break
             time.sleep(0.05)
 
@@ -354,7 +362,7 @@ def test_source_artifacts_endpoint_handles_binary_files_without_text_preview(tmp
         latest_detail = None
         while time.time() < deadline:
             latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if len(latest_detail['jobs']) == 2 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+            if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
                 break
             time.sleep(0.05)
 
@@ -393,6 +401,33 @@ def test_failed_ingest_does_not_queue_transcribe_job() -> None:
     assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest']
     assert latest_detail['jobs'][0]['status'] == 'failed'
     assert latest_detail['sources'][0]['status'] == 'failed'
+
+
+def test_completed_transcribe_auto_queues_and_completes_separate_job() -> None:
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'Auto Separate Track'}).json()
+        source = client.post(
+            f"/api/projects/{project['id']}/sources",
+            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-separate'},
+        ).json()
+        client.post(
+            f"/api/projects/{project['id']}/jobs",
+            json={'source_id': source['id'], 'job_type': 'ingest'},
+        ).json()
+
+        deadline = time.time() + 2.5
+        latest_detail = None
+        while time.time() < deadline:
+            latest_detail = client.get(f"/api/projects/{project['id']}").json()
+            job_types = [item['job_type'] for item in latest_detail['jobs']]
+            if job_types == ['ingest', 'transcribe', 'separate'] and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                break
+            time.sleep(0.05)
+
+    assert latest_detail is not None
+    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
+    assert all(item['status'] == 'completed' for item in latest_detail['jobs'])
+    assert latest_detail['sources'][0]['status'] == 'completed'
 
 
 def test_separate_jobs_are_not_processed_automatically() -> None:

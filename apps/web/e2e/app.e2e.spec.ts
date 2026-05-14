@@ -53,15 +53,15 @@ test.describe('songcraft baseline workflows', () => {
       }
     }).toEqual({
       sourceCompleted: 1,
-      completedJobBadges: 2,
+      completedJobBadges: 3,
       transcribeJobs: 1,
       applyStatusButtons: 0,
     })
 
-    await expect(page.getByText('2 linked jobs')).toBeVisible()
-    await expect(page.getByText('0 active • 2 done • 0 failed')).toBeVisible()
+    await expect(page.getByText('3 linked jobs')).toBeVisible()
+    await expect(page.getByText('0 active • 3 done • 0 failed')).toBeVisible()
     await expect(page.getByText('transcribe — source', { exact: false })).toBeVisible()
-    await expect(page.getByText('No further transitions available.')).toHaveCount(2)
+    await expect(page.getByText('No further transitions available.')).toHaveCount(3)
 
     await page.getByRole('button', { name: /Inspect artifacts for source src_/ }).click()
     await expect(page.getByRole('heading', { name: 'Source artifacts' })).toBeVisible()
@@ -70,11 +70,15 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByText('source_reference.url', { exact: true })).toBeVisible()
     await expect(page.getByText('transcription/transcript.txt', { exact: true })).toBeVisible()
     await expect(page.getByText('transcription/transcript.json', { exact: true })).toBeVisible()
+    await expect(page.getByText('separation/stems.json', { exact: true })).toBeVisible()
     await expect(page.getByText('Stage: ingest • Role: manifest')).toBeVisible()
     await expect(page.getByText('Origin: ingest_worker', { exact: false })).toBeVisible()
     await expect(page.getByText('Stage: transcribe • Role: transcript_text')).toBeVisible()
     await expect(page.getByText('Origin: transcribe_worker', { exact: false })).toHaveCount(2)
+    await expect(page.getByText('Stage: separate • Role: stems_manifest')).toBeVisible()
+    await expect(page.getByText('Origin: separate_worker', { exact: false })).toHaveCount(3)
     await expect(page.getByText('Origin: submitted_source', { exact: false })).toHaveCount(2)
+    await expect(page.getByLabel('Artifact preview for separation/stems.json')).toContainText('vocals')
     await expect(page.getByLabel('Artifact preview for raw_source.txt')).toContainText('https://youtube.com/watch?v=happy')
     await expect(page.getByLabel('Artifact preview for transcription/transcript.txt')).toContainText('Transcript scaffold for source')
 
