@@ -269,13 +269,37 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     }
 
     assert entries_by_path['manifest.json']['content_type'] == 'application/json'
+    assert entries_by_path['manifest.json']['stage'] == 'ingest'
+    assert entries_by_path['manifest.json']['role'] == 'manifest'
+    assert entries_by_path['manifest.json']['origin'] == 'ingest_worker'
+    assert entries_by_path['manifest.json']['updated_at']
     assert 'inspectable-artifacts' in entries_by_path['manifest.json']['preview']
+
     assert entries_by_path['raw_source.txt']['content_type'] == 'text/plain'
+    assert entries_by_path['raw_source.txt']['stage'] == 'ingest'
+    assert entries_by_path['raw_source.txt']['role'] == 'source_value'
+    assert entries_by_path['raw_source.txt']['origin'] == 'submitted_source'
+    assert entries_by_path['raw_source.txt']['updated_at']
     assert entries_by_path['raw_source.txt']['preview'] == 'https://youtube.com/watch?v=inspectable-artifacts'
+
+    assert entries_by_path['source_reference.url']['stage'] == 'ingest'
+    assert entries_by_path['source_reference.url']['role'] == 'source_reference'
+    assert entries_by_path['source_reference.url']['origin'] == 'submitted_source'
+    assert entries_by_path['source_reference.url']['updated_at']
     assert entries_by_path['source_reference.url']['preview'] == 'https://youtube.com/watch?v=inspectable-artifacts'
+
     assert entries_by_path['transcription/transcript.txt']['content_type'] == 'text/plain'
+    assert entries_by_path['transcription/transcript.txt']['stage'] == 'transcribe'
+    assert entries_by_path['transcription/transcript.txt']['role'] == 'transcript_text'
+    assert entries_by_path['transcription/transcript.txt']['origin'] == 'transcribe_worker'
+    assert entries_by_path['transcription/transcript.txt']['updated_at']
     assert 'Transcript scaffold for source' in entries_by_path['transcription/transcript.txt']['preview']
+
     assert entries_by_path['transcription/transcript.json']['content_type'] == 'application/json'
+    assert entries_by_path['transcription/transcript.json']['stage'] == 'transcribe'
+    assert entries_by_path['transcription/transcript.json']['role'] == 'transcript_segments'
+    assert entries_by_path['transcription/transcript.json']['origin'] == 'transcribe_worker'
+    assert entries_by_path['transcription/transcript.json']['updated_at']
     assert 'Placeholder transcript excerpt' in entries_by_path['transcription/transcript.json']['preview']
 
 

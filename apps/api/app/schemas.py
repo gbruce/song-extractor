@@ -62,6 +62,10 @@ class SourceArtifactEntry(BaseModel):
     kind: str
     size_bytes: int
     content_type: str
+    stage: str
+    role: str
+    origin: str
+    updated_at: str
     preview: str | None
 
 

@@ -764,6 +764,8 @@ function App() {
                       <span className="muted">
                         {entry.content_type} • {entry.size_bytes} bytes
                       </span>
+                      <span className="muted">Stage: {entry.stage} • Role: {entry.role}</span>
+                      <span className="muted">Origin: {entry.origin} • Updated: {entry.updated_at}</span>
                       <div className="inline-actions">
                         <a
                           href={api.getSourceArtifactContentUrl(

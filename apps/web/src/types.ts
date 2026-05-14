@@ -42,6 +42,10 @@ export type SourceArtifactEntry = {
   kind: 'file'
   size_bytes: number
   content_type: string
+  stage: string
+  role: string
+  origin: string
+  updated_at: string
   preview: string | null
 }
 

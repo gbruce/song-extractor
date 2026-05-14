@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import mimetypes
 from pathlib import Path, PurePosixPath
@@ -250,12 +251,21 @@ class SQLiteStore:
                         decoded_preview = None
                     if decoded_preview is not None:
                         preview = decoded_preview[:2000]
+
+            stage = self._infer_artifact_stage(relative_path)
+            role = self._infer_artifact_role(relative_path)
+            origin = self._infer_artifact_origin(stage=stage, role=role)
+            updated_at = artifact_path.stat().st_mtime
             entries.append(
                 {
                     'path': relative_path,
                     'kind': 'file',
                     'size_bytes': artifact_path.stat().st_size,
                     'content_type': content_type,
+                    'stage': stage,
+                    'role': role,
+                    'origin': origin,
+                    'updated_at': datetime.fromtimestamp(updated_at, tz=timezone.utc).isoformat(),
                     'preview': preview,
                 }
             )
@@ -265,6 +275,32 @@ class SQLiteStore:
             'source_id': source_id,
             'entries': entries,
         }
+
+    def _infer_artifact_stage(self, relative_path: str) -> str:
+        if relative_path.startswith('transcription/'):
+            return 'transcribe'
+        return 'ingest'
+
+    def _infer_artifact_role(self, relative_path: str) -> str:
+        role_map = {
+            'manifest.json': 'manifest',
+            'raw_source.txt': 'source_value',
+            'source_reference.url': 'source_reference',
+            'transcription/transcript.txt': 'transcript_text',
+            'transcription/transcript.json': 'transcript_segments',
+        }
+        if relative_path in role_map:
+            return role_map[relative_path]
+        if relative_path.startswith('source_media/'):
+            return 'source_media'
+        return 'artifact'
+
+    def _infer_artifact_origin(self, *, stage: str, role: str) -> str:
+        if role in {'source_value', 'source_reference', 'source_media'}:
+            return 'submitted_source'
+        if stage == 'transcribe':
+            return 'transcribe_worker'
+        return 'ingest_worker'
 
     def get_source_artifact_path(
         self,

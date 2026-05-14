@@ -11,6 +11,10 @@ type SourceArtifactEntry = {
   kind: 'file'
   size_bytes: number
   content_type: string
+  stage: string
+  role: string
+  origin: string
+  updated_at: string
   preview: string | null
 }
 
@@ -130,6 +134,10 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       kind: 'file',
       size_bytes: 412,
       content_type: 'application/json',
+      stage: 'ingest',
+      role: 'manifest',
+      origin: 'ingest_worker',
+      updated_at: '2026-05-10T00:06:00Z',
       preview: '{"source_value":"https://youtube.com/watch?v=demo123","persisted_media_path":"source_reference.url"}',
     },
     {
@@ -137,6 +145,10 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       kind: 'file',
       size_bytes: 34,
       content_type: 'text/plain',
+      stage: 'ingest',
+      role: 'source_value',
+      origin: 'submitted_source',
+      updated_at: '2026-05-10T00:06:00Z',
       preview: 'https://youtube.com/watch?v=demo123',
     },
     {
@@ -144,6 +156,10 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       kind: 'file',
       size_bytes: 146,
       content_type: 'text/plain',
+      stage: 'transcribe',
+      role: 'transcript_text',
+      origin: 'transcribe_worker',
+      updated_at: '2026-05-10T00:09:00Z',
       preview: 'Transcript scaffold for source src_123 from youtube input.',
     },
     {
@@ -151,6 +167,10 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       kind: 'file',
       size_bytes: 32,
       content_type: 'audio/x-wav',
+      stage: 'ingest',
+      role: 'source_media',
+      origin: 'submitted_source',
+      updated_at: '2026-05-10T00:06:00Z',
       preview: null,
     },
   ],
@@ -347,12 +367,17 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Source artifacts' })).toBeInTheDocument()
     expect(screen.getByText('manifest.json')).toBeInTheDocument()
     expect(screen.getByText('application/json • 412 bytes')).toBeInTheDocument()
+    expect(screen.getByText('Stage: ingest • Role: manifest')).toBeInTheDocument()
+    expect(screen.getByText('Origin: ingest_worker • Updated: 2026-05-10T00:06:00Z')).toBeInTheDocument()
     expect(screen.getByText('raw_source.txt')).toBeInTheDocument()
     expect(screen.getByText('https://youtube.com/watch?v=demo123')).toBeInTheDocument()
     expect(screen.getByText('transcription/transcript.txt')).toBeInTheDocument()
     expect(screen.getByText('Transcript scaffold for source src_123 from youtube input.')).toBeInTheDocument()
+    expect(screen.getByText('Stage: transcribe • Role: transcript_text')).toBeInTheDocument()
+    expect(screen.getByText('Origin: transcribe_worker • Updated: 2026-05-10T00:09:00Z')).toBeInTheDocument()
     expect(screen.getByText('source_media/demo-source.wav')).toBeInTheDocument()
     expect(screen.getByText('audio/x-wav • 32 bytes')).toBeInTheDocument()
+    expect(screen.getByText('Stage: ingest • Role: source_media')).toBeInTheDocument()
     expect(screen.getByText('Binary artifact preview unavailable. Open the raw artifact to inspect its contents.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open raw artifact raw_source.txt' })).toHaveAttribute(
       'href',
