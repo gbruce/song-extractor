@@ -70,6 +70,11 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByText('source_reference.url', { exact: true })).toBeVisible()
     await expect(page.getByText('transcription/transcript.txt', { exact: true })).toBeVisible()
     await expect(page.getByText('transcription/transcript.json', { exact: true })).toBeVisible()
+    await expect(page.getByText('Stage: ingest • Role: manifest')).toBeVisible()
+    await expect(page.getByText('Origin: ingest_worker', { exact: false })).toBeVisible()
+    await expect(page.getByText('Stage: transcribe • Role: transcript_text')).toBeVisible()
+    await expect(page.getByText('Origin: transcribe_worker', { exact: false })).toHaveCount(2)
+    await expect(page.getByText('Origin: submitted_source', { exact: false })).toHaveCount(2)
     await expect(page.getByLabel('Artifact preview for raw_source.txt')).toContainText('https://youtube.com/watch?v=happy')
     await expect(page.getByLabel('Artifact preview for transcription/transcript.txt')).toContainText('Transcript scaffold for source')
 
