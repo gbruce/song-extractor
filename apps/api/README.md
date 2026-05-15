@@ -17,6 +17,8 @@ FastAPI backend for the local-first songcraft app scaffold.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
+# Optional real stem separation backend (large install; choose CPU/GPU torch build intentionally)
+pip install -e .[demucs]
 pytest -q
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```

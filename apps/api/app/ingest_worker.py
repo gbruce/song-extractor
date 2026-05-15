@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING
 from faster_whisper import WhisperModel
 from yt_dlp import YoutubeDL
 
+try:
+    from demucs.separate import main as demucs_main
+except ImportError:  # pragma: no cover - optional dependency
+    demucs_main = None
+
 if TYPE_CHECKING:
     from app.store import SQLiteStore
 
@@ -383,7 +388,7 @@ class IngestWorker:
 
         vocals_path = separation_dir / 'vocals.wav'
         instrumental_path = separation_dir / 'instrumental.wav'
-        vocals_bytes, instrumental_bytes = self._separate_media_ffmpeg(
+        backend_name, vocals_bytes, instrumental_bytes = self._separate_media(
             source_media_path=source_media_path,
             vocals_path=vocals_path,
             instrumental_path=instrumental_path,
@@ -394,7 +399,7 @@ class IngestWorker:
             'source_id': job['source_id'],
             'job_id': job['id'],
             'job_type': job['job_type'],
-            'backend': 'ffmpeg-phase-invert',
+            'backend': backend_name,
             'based_on': persisted_media_path,
             'source_value': source['value'],
             'stems': [
@@ -408,6 +413,49 @@ class IngestWorker:
             encoding='utf-8',
         )
         self._logger.info('Wrote separation artifacts for job %s to %s', job['id'], separation_dir)
+
+    def _separate_media(self, *, source_media_path: Path, vocals_path: Path, instrumental_path: Path) -> tuple[str, int, int]:
+        try:
+            return self._separate_media_with_demucs(
+                source_media_path=source_media_path,
+                vocals_path=vocals_path,
+                instrumental_path=instrumental_path,
+            )
+        except Exception as exc:
+            self._logger.warning('Falling back to ffmpeg-based separation for %s: %s', source_media_path, exc)
+            vocals_bytes, instrumental_bytes = self._separate_media_ffmpeg(
+                source_media_path=source_media_path,
+                vocals_path=vocals_path,
+                instrumental_path=instrumental_path,
+            )
+            return 'ffmpeg-phase-invert', vocals_bytes, instrumental_bytes
+
+    def _separate_media_with_demucs(self, *, source_media_path: Path, vocals_path: Path, instrumental_path: Path) -> tuple[str, int, int]:
+        if demucs_main is None:
+            raise RuntimeError('demucs not installed')
+
+        temp_dir = vocals_path.parent / '.tmp-demucs'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            try:
+                demucs_main([
+                    '--two-stems=vocals',
+                    '--out', str(temp_dir),
+                    str(source_media_path),
+                ])
+            except SystemExit as exc:
+                raise RuntimeError(f'demucs failed with exit code {exc.code}') from exc
+            stem_root = temp_dir / 'htdemucs' / source_media_path.stem
+            demucs_vocals = stem_root / 'vocals.wav'
+            demucs_other = stem_root / 'no_vocals.wav'
+            if not demucs_vocals.exists() or not demucs_other.exists():
+                raise RuntimeError(f'Missing Demucs output under {stem_root}')
+            shutil.copy2(demucs_vocals, vocals_path)
+            shutil.copy2(demucs_other, instrumental_path)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return 'demucs-hybrid', vocals_path.stat().st_size, instrumental_path.stat().st_size
 
     def _separate_media_ffmpeg(self, *, source_media_path: Path, vocals_path: Path, instrumental_path: Path) -> tuple[int, int]:
         temp_dir = vocals_path.parent / '.tmp-separation'

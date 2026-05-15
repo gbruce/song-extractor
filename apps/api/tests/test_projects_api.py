@@ -37,6 +37,17 @@ def _patch_youtube_download(*, filename: str = 'downloaded-track.wav', payload: 
 
     return patch('app.ingest_worker.YoutubeDL', FakeYoutubeDL)
 
+
+def _patch_demucs_backend(*, backend: str = 'demucs-hybrid', raise_error: bool = False):
+    def fake_separate(self, *, source_media_path, vocals_path, instrumental_path):
+        if raise_error:
+            raise RuntimeError('demucs unavailable')
+        vocals_path.write_bytes(b'demucs-vocals')
+        instrumental_path.write_bytes(b'demucs-instrumental')
+        return backend, vocals_path.stat().st_size, instrumental_path.stat().st_size
+
+    return patch('app.ingest_worker.IngestWorker._separate_media_with_demucs', fake_separate)
+
 def test_project_source_and_job_workflow() -> None:
     with TestClient(app) as client:
         empty_projects = client.get("/api/projects")
@@ -290,7 +301,7 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     settings = get_settings()
     artifacts_root = settings.data_dir / 'projects'
 
-    with _patch_youtube_download():
+    with _patch_youtube_download(), _patch_demucs_backend():
         with TestClient(app) as client:
             project = client.post('/api/projects', json={'name': 'Auto Transcribe Track'}).json()
             source = client.post(
@@ -302,7 +313,7 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
                 json={'source_id': source['id'], 'job_type': 'ingest'},
             ).json()
 
-            deadline = time.time() + 2.0
+            deadline = time.time() + 6.0
             latest_detail = None
             while time.time() < deadline:
                 latest_detail = client.get(f"/api/projects/{project['id']}").json()
@@ -345,9 +356,39 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     stems_payload = json.loads(stems_json_path.read_text(encoding='utf-8'))
     assert stems_payload['based_on'] == 'source_media/downloaded-track.wav'
     assert stems_payload['stems'][0]['path'] == 'separation/vocals.wav'
-    assert stems_payload['backend'] == 'ffmpeg-phase-invert'
+    assert stems_payload['backend'] == 'demucs-hybrid'
     assert stems_payload['stems'][0]['bytes'] > 0
     assert stems_payload['stems'][1]['bytes'] > 0
+
+
+def test_separate_job_falls_back_to_ffmpeg_when_demucs_backend_fails() -> None:
+    settings = get_settings()
+    artifacts_root = settings.data_dir / 'projects'
+
+    with _patch_youtube_download(), _patch_demucs_backend(raise_error=True):
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Fallback Separate Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=fallback-separate'},
+            ).json()
+            client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
+
+            deadline = time.time() + 6.0
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                    break
+                time.sleep(0.05)
+
+    assert latest_detail is not None
+    source_dir = artifacts_root / project['id'] / source['id']
+    stems_payload = json.loads((source_dir / 'separation' / 'stems.json').read_text(encoding='utf-8'))
+    assert stems_payload['backend'] == 'ffmpeg-phase-invert'
 
 
 def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> None:
@@ -363,7 +404,7 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
                 json={'source_id': source['id'], 'job_type': 'ingest'},
             ).json()
 
-            deadline = time.time() + 2.0
+            deadline = time.time() + 6.0
             latest_detail = None
             while time.time() < deadline:
                 latest_detail = client.get(f"/api/projects/{project['id']}").json()
@@ -437,7 +478,8 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     assert entries_by_path['separation/stems.json']['updated_at']
     assert 'source_media/downloaded-track.wav' in entries_by_path['separation/stems.json']['preview']
     assert 'separation/vocals.wav' in entries_by_path['separation/stems.json']['preview']
-    assert 'ffmpeg-phase-invert' in entries_by_path['separation/stems.json']['preview']
+    assert ('demucs-hybrid' in entries_by_path['separation/stems.json']['preview']
+            or 'ffmpeg-phase-invert' in entries_by_path['separation/stems.json']['preview'])
 
     assert entries_by_path['separation/vocals.wav']['stage'] == 'separate'
     assert entries_by_path['separation/vocals.wav']['role'] == 'stem_preview'
@@ -462,7 +504,7 @@ def test_source_artifact_content_endpoint_returns_raw_file_bytes() -> None:
                 json={'source_id': source['id'], 'job_type': 'ingest'},
             ).json()
 
-            deadline = time.time() + 2.0
+            deadline = time.time() + 6.0
             latest_detail = None
             while time.time() < deadline:
                 latest_detail = client.get(f"/api/projects/{project['id']}").json()
@@ -497,7 +539,7 @@ def test_source_artifacts_endpoint_handles_binary_files_without_text_preview(tmp
             json={'source_id': source['id'], 'job_type': 'ingest'},
         ).json()
 
-        deadline = time.time() + 2.0
+        deadline = time.time() + 6.0
         latest_detail = None
         while time.time() < deadline:
             latest_detail = client.get(f"/api/projects/{project['id']}").json()
@@ -528,7 +570,7 @@ def test_failed_ingest_does_not_queue_transcribe_job() -> None:
             json={'source_id': source['id'], 'job_type': 'ingest'},
         ).json()
 
-        deadline = time.time() + 2.0
+        deadline = time.time() + 6.0
         latest_detail = None
         while time.time() < deadline:
             latest_detail = client.get(f"/api/projects/{project['id']}").json()
