@@ -383,19 +383,23 @@ class IngestWorker:
 
         vocals_path = separation_dir / 'vocals.wav'
         instrumental_path = separation_dir / 'instrumental.wav'
-        shutil.copy2(source_media_path, vocals_path)
-        shutil.copy2(source_media_path, instrumental_path)
+        vocals_bytes, instrumental_bytes = self._separate_media_ffmpeg(
+            source_media_path=source_media_path,
+            vocals_path=vocals_path,
+            instrumental_path=instrumental_path,
+        )
 
         stems_payload = {
             'project_id': job['project_id'],
             'source_id': job['source_id'],
             'job_id': job['id'],
             'job_type': job['job_type'],
+            'backend': 'ffmpeg-phase-invert',
             'based_on': persisted_media_path,
             'source_value': source['value'],
             'stems': [
-                {'name': 'vocals', 'status': 'ready', 'path': 'separation/vocals.wav'},
-                {'name': 'instrumental', 'status': 'ready', 'path': 'separation/instrumental.wav'},
+                {'name': 'vocals', 'status': 'ready', 'path': 'separation/vocals.wav', 'bytes': vocals_bytes},
+                {'name': 'instrumental', 'status': 'ready', 'path': 'separation/instrumental.wav', 'bytes': instrumental_bytes},
             ],
         }
 
@@ -404,6 +408,73 @@ class IngestWorker:
             encoding='utf-8',
         )
         self._logger.info('Wrote separation artifacts for job %s to %s', job['id'], separation_dir)
+
+    def _separate_media_ffmpeg(self, *, source_media_path: Path, vocals_path: Path, instrumental_path: Path) -> tuple[int, int]:
+        temp_dir = vocals_path.parent / '.tmp-separation'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        mono_source = temp_dir / 'mono_source.wav'
+        side_channel = temp_dir / 'side.wav'
+        vocals_mono = temp_dir / 'vocals_mono.wav'
+        instrumental_mono = temp_dir / 'instrumental_mono.wav'
+
+        try:
+            subprocess.run(
+                [
+                    'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                    '-i', str(source_media_path),
+                    '-ac', '1', '-ar', '16000',
+                    str(mono_source),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            subprocess.run(
+                [
+                    'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                    '-i', str(source_media_path),
+                    '-af', 'pan=mono|c0=0.5*c0-0.5*c1', '-ar', '16000',
+                    str(side_channel),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            subprocess.run(
+                [
+                    'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                    '-i', str(mono_source), '-i', str(side_channel),
+                    '-filter_complex', '[0:a][1:a]amix=inputs=2:weights=1 -1:normalize=0',
+                    '-ac', '1', '-ar', '16000',
+                    str(vocals_mono),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            subprocess.run(
+                [
+                    'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                    '-i', str(mono_source), '-i', str(vocals_mono),
+                    '-filter_complex', '[0:a][1:a]amix=inputs=2:weights=1 -1:normalize=0',
+                    '-ac', '1', '-ar', '16000',
+                    str(instrumental_mono),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            shutil.copy2(vocals_mono, vocals_path)
+            shutil.copy2(instrumental_mono, instrumental_path)
+        except Exception as exc:
+            self._logger.warning('Falling back to copy-based separation for %s: %s', source_media_path, exc)
+            shutil.copy2(source_media_path, vocals_path)
+            shutil.copy2(source_media_path, instrumental_path)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return vocals_path.stat().st_size, instrumental_path.stat().st_size
 
     def _process_separate_job(self, job: dict[str, str]) -> None:
         self._logger.info('Processing separate job %s for source %s', job['id'], job['source_id'])

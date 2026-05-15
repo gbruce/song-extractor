@@ -8,6 +8,13 @@ from starlette.requests import Request
 
 from app.api.routes_health import stream_logs
 from app.main import app
+from app.store import reset_store
+
+
+def setup_function() -> None:
+    app.state.ingest_worker.stop()
+    app.state.log_buffer.clear()
+    reset_store(app.state.store)
 
 
 def test_healthcheck_returns_expected_payload() -> None:
@@ -141,7 +148,7 @@ def test_recent_logs_endpoint_includes_worker_messages() -> None:
             media_dir = Path(str(self.opts['outtmpl'])).parent
             media_dir.mkdir(parents=True, exist_ok=True)
             media_path = (media_dir / 'worker-logs.wav').resolve()
-            media_path.write_bytes(b'worker-log-audio')
+            media_path.write_bytes(bytes.fromhex('524946462400000057415645666d74201000000001000100803e0000007d0000020010006461746100000000'))
             return {'requested_downloads': [{'filepath': str(media_path)}]}
 
     with patch('app.ingest_worker.YoutubeDL', FakeYoutubeDL):

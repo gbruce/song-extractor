@@ -12,12 +12,18 @@ from app.store import reset_store
 
 def setup_function() -> None:
     app.state.ingest_worker.stop()
+    app.state.log_buffer.clear()
     reset_store(app.state.store)
 
 
 
 
-def _patch_youtube_download(*, filename: str = 'downloaded-track.wav', payload: bytes = b'real-youtube-audio'):
+def _patch_youtube_download(*, filename: str = 'downloaded-track.wav', payload: bytes | None = None):
+    if payload is None:
+        payload = bytes.fromhex(
+            '524946462400000057415645666d74201000000001000100803e0000007d0000020010006461746100000000'
+        )
+
     class FakeYoutubeDL:
         def __init__(self, opts: dict[str, object]) -> None:
             self.opts = opts
@@ -197,7 +203,9 @@ def test_ingest_worker_downloads_real_youtube_audio_with_yt_dlp() -> None:
     manifest = (source_dir / 'manifest.json').read_text(encoding='utf-8')
 
     assert downloaded_media_path.exists()
-    assert downloaded_media_path.read_bytes() == b'real-youtube-audio'
+    assert downloaded_media_path.read_bytes() == bytes.fromhex(
+        '524946462400000057415645666d74201000000001000100803e0000007d0000020010006461746100000000'
+    )
     assert 'source_media/downloaded-track.wav' in manifest
     assert 'reference-tone.wav' not in manifest
 
@@ -337,6 +345,9 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     stems_payload = json.loads(stems_json_path.read_text(encoding='utf-8'))
     assert stems_payload['based_on'] == 'source_media/downloaded-track.wav'
     assert stems_payload['stems'][0]['path'] == 'separation/vocals.wav'
+    assert stems_payload['backend'] == 'ffmpeg-phase-invert'
+    assert stems_payload['stems'][0]['bytes'] > 0
+    assert stems_payload['stems'][1]['bytes'] > 0
 
 
 def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> None:
@@ -426,6 +437,7 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     assert entries_by_path['separation/stems.json']['updated_at']
     assert 'source_media/downloaded-track.wav' in entries_by_path['separation/stems.json']['preview']
     assert 'separation/vocals.wav' in entries_by_path['separation/stems.json']['preview']
+    assert 'ffmpeg-phase-invert' in entries_by_path['separation/stems.json']['preview']
 
     assert entries_by_path['separation/vocals.wav']['stage'] == 'separate'
     assert entries_by_path['separation/vocals.wav']['role'] == 'stem_preview'
