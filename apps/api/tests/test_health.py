@@ -1,5 +1,7 @@
 import asyncio
+from pathlib import Path
 import time
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -131,29 +133,41 @@ def test_log_stream_endpoint_emits_existing_and_new_entries() -> None:
 def test_recent_logs_endpoint_includes_worker_messages() -> None:
     app.state.log_buffer.clear()
 
-    with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Worker Logs Track'}).json()
-        source = client.post(
-            f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=worker-logs'},
-        ).json()
-        client.post(
-            f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'ingest'},
-        )
+    class FakeYoutubeDL:
+        def __init__(self, opts):
+            self.opts = opts
 
-        deadline = time.time() + 1.5
-        entries: list[str] = []
-        latest_detail: dict[str, object] | None = None
-        while time.time() < deadline:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            entries = list(app.state.log_buffer)
-            if latest_detail['jobs'][0]['status'] == 'completed':
-                break
-            time.sleep(0.05)
-        else:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            entries = list(app.state.log_buffer)
+        def extract_info(self, url, download=True):
+            media_dir = Path(str(self.opts['outtmpl'])).parent
+            media_dir.mkdir(parents=True, exist_ok=True)
+            media_path = (media_dir / 'worker-logs.wav').resolve()
+            media_path.write_bytes(b'worker-log-audio')
+            return {'requested_downloads': [{'filepath': str(media_path)}]}
+
+    with patch('app.ingest_worker.YoutubeDL', FakeYoutubeDL):
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Worker Logs Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=worker-logs'},
+            ).json()
+            client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            )
+
+            deadline = time.time() + 1.5
+            entries: list[str] = []
+            latest_detail: dict[str, object] | None = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                entries = list(app.state.log_buffer)
+                if latest_detail['jobs'][0]['status'] == 'completed':
+                    break
+                time.sleep(0.05)
+            else:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                entries = list(app.state.log_buffer)
 
     assert latest_detail is not None
     assert latest_detail['jobs'][0]['status'] == 'completed'

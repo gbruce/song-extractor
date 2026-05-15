@@ -1,4 +1,29 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
+
 import { test, expect } from '@playwright/test'
+
+function createWavFixture(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'songcraft-e2e-'))
+  const filePath = join(dir, 'fixture.wav')
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(16000, 24)
+  header.writeUInt32LE(32000, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(0, 40)
+  writeFileSync(filePath, header)
+  return filePath
+}
 
 test.describe('songcraft baseline workflows', () => {
   test('submit-source form updates persistence guidance for local-file ingest', async ({ page }) => {
@@ -24,22 +49,23 @@ test.describe('songcraft baseline workflows', () => {
 
   test('happy path: ingest auto-queues and completes transcribe after persistence', async ({ page, request }) => {
     const projectName = `E2E Happy Path ${Date.now()}`
-    const sourceValue = `https://youtube.com/watch?v=happy${Date.now()}`
+    const localFixture = createWavFixture()
 
     await page.goto('/')
 
+    await page.getByLabel('Source type').selectOption('local_file')
     await expect(
-      page.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
+      page.getByText('Local file sources are copied into source_media/<filename> during ingest.'),
     ).toBeVisible()
-    await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', 'https://youtube.com/watch?v=...')
+    await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', '/path/to/reference-track.wav')
 
     await page.getByLabel('Project name').fill(projectName)
     await page.getByRole('button', { name: 'Create project' }).click()
     await expect(page.getByText(`Created project ${projectName}`)).toBeVisible()
 
-    await page.getByLabel('Source value').fill(sourceValue)
+    await page.getByLabel('Source value').fill(localFixture)
     await page.getByRole('button', { name: 'Submit source and queue ingest job' }).click()
-    await expect(page.getByText('Submitted youtube source for ingest')).toBeVisible()
+    await expect(page.getByText('Submitted local_file source for ingest')).toBeVisible()
 
     await expect(page.getByText('Manual source overrides unlock after the active ingest job reaches a terminal state.')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Apply manual source override' })).toHaveCount(0)
@@ -67,7 +93,7 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByRole('heading', { name: 'Source artifacts' })).toBeVisible()
     await expect(page.getByText('manifest.json', { exact: true })).toBeVisible()
     await expect(page.getByText('raw_source.txt', { exact: true })).toBeVisible()
-    await expect(page.getByText('source_reference.url', { exact: true })).toBeVisible()
+    await expect(page.getByText(`source_media/${basename(localFixture)}`, { exact: true })).toBeVisible()
     await expect(page.getByText('transcription/transcript.txt', { exact: true })).toBeVisible()
     await expect(page.getByText('transcription/transcript.json', { exact: true })).toBeVisible()
     await expect(page.getByText('separation/stems.json', { exact: true })).toBeVisible()
@@ -77,9 +103,9 @@ test.describe('songcraft baseline workflows', () => {
     await expect(page.getByText('Origin: transcribe_worker', { exact: false })).toHaveCount(2)
     await expect(page.getByText('Stage: separate • Role: stems_manifest')).toBeVisible()
     await expect(page.getByText('Origin: separate_worker', { exact: false })).toHaveCount(3)
-    await expect(page.getByText('Origin: submitted_source', { exact: false })).toHaveCount(3)
+    await expect(page.getByText('Origin: submitted_source', { exact: false })).toHaveCount(2)
     await expect(page.getByLabel('Artifact preview for separation/stems.json')).toContainText('vocals')
-    await expect(page.getByLabel('Artifact preview for raw_source.txt')).toContainText('https://youtube.com/watch?v=happy')
+    await expect(page.getByLabel('Artifact preview for raw_source.txt')).toContainText(localFixture)
     await expect(page.getByLabel('Artifact preview for transcription/transcript.txt')).toContainText('This transcript was generated from persisted media using the real transcription backend.')
 
     const rawArtifactLink = page.getByRole('link', { name: 'Open raw artifact raw_source.txt' })
@@ -88,7 +114,7 @@ test.describe('songcraft baseline workflows', () => {
     expect(rawArtifactHref).toBeTruthy()
     const rawArtifactResponse = await request.get(rawArtifactHref!)
     expect(rawArtifactResponse.ok()).toBeTruthy()
-    await expect(rawArtifactResponse.text()).resolves.toContain('https://youtube.com/watch?v=happy')
+    await expect(rawArtifactResponse.text()).resolves.toContain(localFixture)
   })
 
   test('failure recovery path: failed ingest unlocks manual source recovery', async ({ page }) => {

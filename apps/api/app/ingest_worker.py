@@ -10,6 +10,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from faster_whisper import WhisperModel
+from yt_dlp import YoutubeDL
 
 if TYPE_CHECKING:
     from app.store import SQLiteStore
@@ -88,11 +89,13 @@ class IngestWorker:
         self._logger.info('Wrote ingest artifacts for job %s to %s', job['id'], source_dir)
 
     def _persist_source_media(self, *, source_dir: Path, source: dict[str, str]) -> tuple[str, int | None]:
+        resolved_source_dir = source_dir.resolve()
+
         if source['kind'] == 'youtube':
             reference_path = source_dir / 'source_reference.url'
             reference_path.write_text(source['value'], encoding='utf-8')
-            generated_media_path = self._generate_youtube_reference_media(source_dir=source_dir, source=source)
-            return (str(generated_media_path.relative_to(source_dir)), generated_media_path.stat().st_size)
+            downloaded_media_path = self._download_youtube_media(source_dir=source_dir, source=source).resolve()
+            return (str(downloaded_media_path.relative_to(resolved_source_dir)), downloaded_media_path.stat().st_size)
 
         if source['kind'] in {'local_file', 'upload'}:
             original_path = Path(source['value'])
@@ -103,7 +106,7 @@ class IngestWorker:
             media_dir.mkdir(parents=True, exist_ok=True)
             destination_path = media_dir / original_path.name
             shutil.copy2(original_path, destination_path)
-            return (str(destination_path.relative_to(source_dir)), destination_path.stat().st_size)
+            return (str(destination_path.resolve().relative_to(resolved_source_dir)), destination_path.stat().st_size)
 
         raise RuntimeError(f"Unsupported source kind for ingest persistence: {source['kind']}")
 
@@ -179,6 +182,51 @@ class IngestWorker:
         pcm_path.unlink(missing_ok=True)
 
         return media_path
+
+    def _download_youtube_media(self, *, source_dir: Path, source: dict[str, str]) -> Path:
+        media_dir = source_dir / 'source_media'
+        media_dir.mkdir(parents=True, exist_ok=True)
+        output_template = str(media_dir / '%(title).80s.%(ext)s')
+
+        downloader = YoutubeDL(
+            {
+                'format': 'bestaudio/best',
+                'outtmpl': output_template,
+                'noplaylist': True,
+                'quiet': True,
+                'no_warnings': True,
+                'postprocessors': [
+                    {
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'wav',
+                        'preferredquality': '0',
+                    }
+                ],
+            }
+        )
+
+        info = downloader.extract_info(source['value'], download=True)
+        if info is None:
+            raise RuntimeError(f"yt-dlp returned no metadata for {source['value']}")
+
+        requested_downloads = info.get('requested_downloads')
+        if isinstance(requested_downloads, list) and requested_downloads:
+            filepath = requested_downloads[0].get('filepath')
+            if isinstance(filepath, str):
+                media_path = Path(filepath)
+                wav_path = media_path.with_suffix('.wav')
+                if wav_path.exists():
+                    return wav_path
+                if media_path.exists():
+                    return media_path
+
+        for candidate in sorted(media_dir.glob('*.wav')):
+            return candidate
+        for candidate in sorted(media_dir.iterdir()):
+            if candidate.is_file():
+                return candidate
+
+        raise RuntimeError(f"yt-dlp did not produce a media file for {source['value']}")
 
     def _get_whisper_model(self) -> WhisperModel:
         if self._whisper_model is None:

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import time
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -10,8 +11,25 @@ from app.store import reset_store
 
 
 def setup_function() -> None:
+    app.state.ingest_worker.stop()
     reset_store(app.state.store)
 
+
+
+
+def _patch_youtube_download(*, filename: str = 'downloaded-track.wav', payload: bytes = b'real-youtube-audio'):
+    class FakeYoutubeDL:
+        def __init__(self, opts: dict[str, object]) -> None:
+            self.opts = opts
+
+        def extract_info(self, url: str, download: bool = True) -> dict[str, object]:
+            media_dir = Path(str(self.opts['outtmpl'])).parent
+            media_dir.mkdir(parents=True, exist_ok=True)
+            media_path = (media_dir / filename).resolve()
+            media_path.write_bytes(payload)
+            return {'requested_downloads': [{'filepath': str(media_path)}]}
+
+    return patch('app.ingest_worker.YoutubeDL', FakeYoutubeDL)
 
 def test_project_source_and_job_workflow() -> None:
     with TestClient(app) as client:
@@ -68,56 +86,58 @@ def test_project_source_and_job_workflow() -> None:
 
 
 def test_queued_ingest_job_is_processed_automatically() -> None:
-    with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Auto Ingest Track'}).json()
-        source = client.post(
-            f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-ingest'},
-        ).json()
-        job = client.post(
-            f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'ingest'},
-        ).json()
+    with _patch_youtube_download():
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Auto Ingest Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-ingest'},
+            ).json()
+            job = client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
 
-        assert job['status'] == 'queued'
+            assert job['status'] == 'queued'
 
-        deadline = time.time() + 1.5
-        latest_detail = None
-        while time.time() < deadline:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if latest_detail['jobs'][0]['status'] == 'completed':
-                break
-            time.sleep(0.05)
+            deadline = time.time() + 1.5
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if latest_detail['jobs'][0]['status'] == 'completed':
+                    break
+                time.sleep(0.05)
 
-        assert latest_detail is not None
-        assert latest_detail['jobs'][0]['id'] == job['id']
-        assert latest_detail['jobs'][0]['status'] == 'completed'
-        assert latest_detail['sources'][0]['id'] == source['id']
-        assert latest_detail['sources'][0]['status'] == 'completed'
+            assert latest_detail is not None
+            assert latest_detail['jobs'][0]['id'] == job['id']
+            assert latest_detail['jobs'][0]['status'] == 'completed'
+            assert latest_detail['sources'][0]['id'] == source['id']
+            assert latest_detail['sources'][0]['status'] == 'completed'
 
 
 def test_ingest_worker_writes_youtube_reference_artifacts() -> None:
     settings = get_settings()
     artifacts_root = settings.data_dir / 'projects'
 
-    with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Artifact Track'}).json()
-        source = client.post(
-            f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=artifact-ingest'},
-        ).json()
-        job = client.post(
-            f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'ingest'},
-        ).json()
+    with _patch_youtube_download():
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Artifact Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=artifact-ingest'},
+            ).json()
+            job = client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
 
-        deadline = time.time() + 1.5
-        latest_detail = None
-        while time.time() < deadline:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if latest_detail['jobs'][0]['status'] == 'completed':
-                break
-            time.sleep(0.05)
+            deadline = time.time() + 1.5
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if latest_detail['jobs'][0]['status'] == 'completed':
+                    break
+                time.sleep(0.05)
 
     assert latest_detail is not None
     assert latest_detail['jobs'][0]['id'] == job['id']
@@ -145,6 +165,76 @@ def test_ingest_worker_writes_youtube_reference_artifacts() -> None:
     assert 'source_reference.url' in manifest
     assert raw_source == 'https://youtube.com/watch?v=artifact-ingest'
     assert source_reference == 'https://youtube.com/watch?v=artifact-ingest'
+
+
+def test_ingest_worker_downloads_real_youtube_audio_with_yt_dlp() -> None:
+    settings = get_settings()
+    artifacts_root = settings.data_dir / 'projects'
+
+    with _patch_youtube_download():
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Downloaded YouTube Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=download-real-audio'},
+            ).json()
+            client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
+
+            deadline = time.time() + 1.5
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if latest_detail['jobs'][0]['status'] == 'completed':
+                    break
+                time.sleep(0.05)
+
+    assert latest_detail is not None
+    source_dir = artifacts_root / project['id'] / source['id']
+    downloaded_media_path = source_dir / 'source_media' / 'downloaded-track.wav'
+    manifest = (source_dir / 'manifest.json').read_text(encoding='utf-8')
+
+    assert downloaded_media_path.exists()
+    assert downloaded_media_path.read_bytes() == b'real-youtube-audio'
+    assert 'source_media/downloaded-track.wav' in manifest
+    assert 'reference-tone.wav' not in manifest
+
+
+def test_ingest_worker_handles_absolute_downloaded_media_paths() -> None:
+    settings = get_settings()
+    artifacts_root = settings.data_dir / 'projects'
+
+    with _patch_youtube_download(filename='absolute-track.wav', payload=b'absolute-youtube-audio'):
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Absolute Download Path Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=absolute-download-path'},
+            ).json()
+            client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
+
+            deadline = time.time() + 1.5
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if latest_detail['jobs'][0]['status'] in {'completed', 'failed'}:
+                    break
+                time.sleep(0.05)
+
+    assert latest_detail is not None
+    assert latest_detail['jobs'][0]['status'] == 'completed'
+    assert latest_detail['sources'][0]['status'] == 'completed'
+
+    source_dir = artifacts_root / project['id'] / source['id']
+    manifest = json.loads((source_dir / 'manifest.json').read_text(encoding='utf-8'))
+
+    assert manifest['persisted_media_path'] == 'source_media/absolute-track.wav'
+    assert (source_dir / manifest['persisted_media_path']).read_bytes() == b'absolute-youtube-audio'
 
 
 def test_ingest_worker_copies_local_file_source_media(tmp_path: Path) -> None:
@@ -192,24 +282,25 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     settings = get_settings()
     artifacts_root = settings.data_dir / 'projects'
 
-    with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Auto Transcribe Track'}).json()
-        source = client.post(
-            f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-transcribe'},
-        ).json()
-        job = client.post(
-            f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'ingest'},
-        ).json()
+    with _patch_youtube_download():
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Auto Transcribe Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-transcribe'},
+            ).json()
+            job = client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
 
-        deadline = time.time() + 2.0
-        latest_detail = None
-        while time.time() < deadline:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
-                break
-            time.sleep(0.05)
+            deadline = time.time() + 2.0
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                    break
+                time.sleep(0.05)
 
     assert latest_detail is not None
     assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
@@ -237,33 +328,35 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     assert transcript_json['duration_seconds'] >= 0.5
     assert transcript_json['media_duration_seconds'] >= transcript_json['duration_seconds']
     assert transcript_json['segments']
-    assert 'scribe reference' in transcript_json['segments'][0]['text'].lower()
+    assert transcript_json['persisted_media_path'] == 'source_media/downloaded-track.wav'
+    assert 'reference-tone' not in transcript_text
 
 
 def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> None:
-    with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Inspectable Artifact Track'}).json()
-        source = client.post(
-            f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=inspectable-artifacts'},
-        ).json()
-        client.post(
-            f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'ingest'},
-        ).json()
+    with _patch_youtube_download():
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Inspectable Artifact Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=inspectable-artifacts'},
+            ).json()
+            client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
 
-        deadline = time.time() + 2.0
-        latest_detail = None
-        while time.time() < deadline:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
-                break
-            time.sleep(0.05)
+            deadline = time.time() + 2.0
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                    break
+                time.sleep(0.05)
 
-        assert latest_detail is not None
-        assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
+            assert latest_detail is not None
+            assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
 
-        response = client.get(f"/api/projects/{project['id']}/sources/{source['id']}/artifacts")
+            response = client.get(f"/api/projects/{project['id']}/sources/{source['id']}/artifacts")
 
     assert response.status_code == 200
     payload = response.json()
@@ -325,30 +418,31 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
 
 
 def test_source_artifact_content_endpoint_returns_raw_file_bytes() -> None:
-    with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Raw Artifact Access Track'}).json()
-        source = client.post(
-            f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=raw-access'},
-        ).json()
-        client.post(
-            f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'ingest'},
-        ).json()
+    with _patch_youtube_download():
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Raw Artifact Access Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=raw-access'},
+            ).json()
+            client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
 
-        deadline = time.time() + 2.0
-        latest_detail = None
-        while time.time() < deadline:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
-                break
-            time.sleep(0.05)
+            deadline = time.time() + 2.0
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                if len(latest_detail['jobs']) == 3 and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                    break
+                time.sleep(0.05)
 
-        assert latest_detail is not None
+            assert latest_detail is not None
 
-        response = client.get(
-            f"/api/projects/{project['id']}/sources/{source['id']}/artifacts/raw_source.txt/content"
-        )
+            response = client.get(
+                f"/api/projects/{project['id']}/sources/{source['id']}/artifacts/raw_source.txt/content"
+            )
 
     assert response.status_code == 200
     assert response.headers['content-type'].startswith('text/plain')
@@ -416,25 +510,26 @@ def test_failed_ingest_does_not_queue_transcribe_job() -> None:
 
 
 def test_completed_transcribe_auto_queues_and_completes_separate_job() -> None:
-    with TestClient(app) as client:
-        project = client.post('/api/projects', json={'name': 'Auto Separate Track'}).json()
-        source = client.post(
-            f"/api/projects/{project['id']}/sources",
-            json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-separate'},
-        ).json()
-        client.post(
-            f"/api/projects/{project['id']}/jobs",
-            json={'source_id': source['id'], 'job_type': 'ingest'},
-        ).json()
+    with _patch_youtube_download():
+        with TestClient(app) as client:
+            project = client.post('/api/projects', json={'name': 'Auto Separate Track'}).json()
+            source = client.post(
+                f"/api/projects/{project['id']}/sources",
+                json={'kind': 'youtube', 'value': 'https://youtube.com/watch?v=auto-separate'},
+            ).json()
+            client.post(
+                f"/api/projects/{project['id']}/jobs",
+                json={'source_id': source['id'], 'job_type': 'ingest'},
+            ).json()
 
-        deadline = time.time() + 2.5
-        latest_detail = None
-        while time.time() < deadline:
-            latest_detail = client.get(f"/api/projects/{project['id']}").json()
-            job_types = [item['job_type'] for item in latest_detail['jobs']]
-            if job_types == ['ingest', 'transcribe', 'separate'] and all(item['status'] == 'completed' for item in latest_detail['jobs']):
-                break
-            time.sleep(0.05)
+            deadline = time.time() + 2.5
+            latest_detail = None
+            while time.time() < deadline:
+                latest_detail = client.get(f"/api/projects/{project['id']}").json()
+                job_types = [item['job_type'] for item in latest_detail['jobs']]
+                if job_types == ['ingest', 'transcribe', 'separate'] and all(item['status'] == 'completed' for item in latest_detail['jobs']):
+                    break
+                time.sleep(0.05)
 
     assert latest_detail is not None
     assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
