@@ -360,12 +360,26 @@ class SQLiteStore:
         if self.has_job(project_id=project_id, source_id=source_id, job_type='transcribe'):
             return None
 
-        manifest = self.get_source_artifact_manifest(project_id=project_id, source_id=source_id, data_dir=data_dir)
-        if manifest is None:
+        vocals_artifact = self.get_source_artifact_path(
+            project_id=project_id,
+            source_id=source_id,
+            artifact_path='separation/vocals.wav',
+            data_dir=data_dir,
+        )
+        if vocals_artifact is None:
             return None
 
-        persisted_media_path = manifest.get('persisted_media_path')
-        if not isinstance(persisted_media_path, str) or not persisted_media_path:
+        with self._connect() as connection:
+            completed_separate_job = connection.execute(
+                """
+                SELECT 1
+                FROM jobs
+                WHERE project_id = ? AND source_id = ? AND job_type = 'separate' AND status = 'completed'
+                LIMIT 1
+                """,
+                (project_id, source_id),
+            ).fetchone()
+        if completed_separate_job is None:
             return None
 
         return self.add_job(project_id=project_id, source_id=source_id, job_type='transcribe')
@@ -379,26 +393,12 @@ class SQLiteStore:
         if self.has_job(project_id=project_id, source_id=source_id, job_type='separate'):
             return None
 
-        transcript_artifact = self.get_source_artifact_path(
-            project_id=project_id,
-            source_id=source_id,
-            artifact_path='transcription/transcript.json',
-            data_dir=data_dir,
-        )
-        if transcript_artifact is None:
+        manifest = self.get_source_artifact_manifest(project_id=project_id, source_id=source_id, data_dir=data_dir)
+        if manifest is None:
             return None
 
-        with self._connect() as connection:
-            completed_transcribe_job = connection.execute(
-                """
-                SELECT 1
-                FROM jobs
-                WHERE project_id = ? AND source_id = ? AND job_type = 'transcribe' AND status = 'completed'
-                LIMIT 1
-                """,
-                (project_id, source_id),
-            ).fetchone()
-        if completed_transcribe_job is None:
+        persisted_media_path = manifest.get('persisted_media_path')
+        if not isinstance(persisted_media_path, str) or not persisted_media_path:
             return None
 
         return self.add_job(project_id=project_id, source_id=source_id, job_type='separate')

@@ -251,7 +251,7 @@ class IngestWorker:
         )
         return float(ffprobe_result.stdout.strip() or '0')
 
-    def _transcribe_media(self, *, media_path: Path, source: dict[str, str], job: dict[str, str]) -> tuple[str, dict[str, object]]:
+    def _transcribe_media(self, *, media_path: Path, source: dict[str, str], job: dict[str, str], transcription_input: str) -> tuple[str, dict[str, object]]:
         backend_name = 'faster-whisper'
 
         try:
@@ -295,6 +295,7 @@ class IngestWorker:
         transcript_lines = [
             f"Transcript for source {source['id']} from {source['kind']} input.",
             f"Original source: {source['value']}",
+            f"Transcription input: {transcription_input}",
             f"Persisted media: {media_path.relative_to(self._data_dir / 'projects' / job['project_id'] / job['source_id'])}",
             'This transcript was generated from persisted media using the real transcription backend.',
             '',
@@ -310,6 +311,7 @@ class IngestWorker:
             'language': detected_language,
             'source_kind': source['kind'],
             'source_value': source['value'],
+            'transcription_input': transcription_input,
             'persisted_media_path': str(media_path.relative_to(self._data_dir / 'projects' / job['project_id'] / job['source_id'])),
             'media_duration_seconds': round(media_duration_seconds, 2),
             'duration_seconds': duration_seconds,
@@ -324,22 +326,30 @@ class IngestWorker:
         transcription_dir = source_dir / 'transcription'
         transcription_dir.mkdir(parents=True, exist_ok=True)
 
-        ingest_manifest = self._store.get_source_artifact_manifest(
-            project_id=job['project_id'],
-            source_id=job['source_id'],
-            data_dir=self._data_dir,
-        )
-        if ingest_manifest is None:
-            raise RuntimeError('Missing ingest manifest while writing transcription artifacts')
+        vocals_media_path = source_dir / 'separation' / 'vocals.wav'
+        if vocals_media_path.exists():
+            media_path = vocals_media_path
+            transcription_input = 'vocals_stem'
+        else:
+            ingest_manifest = self._store.get_source_artifact_manifest(
+                project_id=job['project_id'],
+                source_id=job['source_id'],
+                data_dir=self._data_dir,
+            )
+            if ingest_manifest is None:
+                raise RuntimeError('Missing ingest manifest while writing transcription artifacts')
 
-        persisted_media_path = ingest_manifest.get('persisted_media_path')
-        if not isinstance(persisted_media_path, str) or not persisted_media_path:
-            raise RuntimeError('Missing persisted media path while writing transcription artifacts')
-        media_path = source_dir / persisted_media_path
+            persisted_media_path = ingest_manifest.get('persisted_media_path')
+            if not isinstance(persisted_media_path, str) or not persisted_media_path:
+                raise RuntimeError('Missing persisted media path while writing transcription artifacts')
+            media_path = source_dir / persisted_media_path
+            transcription_input = 'full_mix'
+
         transcript_text, transcript_payload = self._transcribe_media(
             media_path=media_path,
             source=source,
             job=job,
+            transcription_input=transcription_input,
         )
 
         (transcription_dir / 'transcript.txt').write_text(transcript_text, encoding='utf-8')
@@ -355,25 +365,37 @@ class IngestWorker:
         separation_dir = source_dir / 'separation'
         separation_dir.mkdir(parents=True, exist_ok=True)
 
-        transcript_artifact = self._store.get_source_artifact_path(
+        ingest_manifest = self._store.get_source_artifact_manifest(
             project_id=job['project_id'],
             source_id=job['source_id'],
-            artifact_path='transcription/transcript.json',
             data_dir=self._data_dir,
         )
-        if transcript_artifact is None:
-            raise RuntimeError('Missing transcription artifact while writing separation artifacts')
+        if ingest_manifest is None:
+            raise RuntimeError('Missing ingest manifest while writing separation artifacts')
+
+        persisted_media_path = ingest_manifest.get('persisted_media_path')
+        if not isinstance(persisted_media_path, str) or not persisted_media_path:
+            raise RuntimeError('Missing persisted media path while writing separation artifacts')
+
+        source_media_path = source_dir / persisted_media_path
+        if not source_media_path.exists():
+            raise RuntimeError('Missing source media while writing separation artifacts')
+
+        vocals_path = separation_dir / 'vocals.wav'
+        instrumental_path = separation_dir / 'instrumental.wav'
+        shutil.copy2(source_media_path, vocals_path)
+        shutil.copy2(source_media_path, instrumental_path)
 
         stems_payload = {
             'project_id': job['project_id'],
             'source_id': job['source_id'],
             'job_id': job['id'],
             'job_type': job['job_type'],
-            'based_on': 'transcription/transcript.json',
+            'based_on': persisted_media_path,
             'source_value': source['value'],
             'stems': [
-                {'name': 'vocals', 'status': 'ready', 'path': 'separation/vocals.txt'},
-                {'name': 'instrumental', 'status': 'ready', 'path': 'separation/instrumental.txt'},
+                {'name': 'vocals', 'status': 'ready', 'path': 'separation/vocals.wav'},
+                {'name': 'instrumental', 'status': 'ready', 'path': 'separation/instrumental.wav'},
             ],
         }
 
@@ -381,15 +403,45 @@ class IngestWorker:
             json.dumps(stems_payload, indent=2, sort_keys=True),
             encoding='utf-8',
         )
-        (separation_dir / 'vocals.txt').write_text(
-            f"Placeholder separated vocals preview for source {source['id']}.\n",
-            encoding='utf-8',
-        )
-        (separation_dir / 'instrumental.txt').write_text(
-            f"Placeholder separated instrumental preview for source {source['id']}.\n",
-            encoding='utf-8',
-        )
         self._logger.info('Wrote separation artifacts for job %s to %s', job['id'], separation_dir)
+
+    def _process_separate_job(self, job: dict[str, str]) -> None:
+        self._logger.info('Processing separate job %s for source %s', job['id'], job['source_id'])
+        if self._stop_event.wait(self._processing_delay_seconds):
+            return
+
+        source = self._store.get_source(project_id=job['project_id'], source_id=job['source_id'])
+        if source is None:
+            raise RuntimeError('Missing source while processing separate job')
+        if source['status'] != 'completed':
+            raise RuntimeError('Separate job requires a completed source')
+
+        self._write_separation_artifacts(job, source)
+        completed_job = self._store.update_job_status(
+            project_id=job['project_id'],
+            job_id=job['id'],
+            status='completed',
+        )
+        if completed_job is not None:
+            self._logger.info('Completed separate job %s', completed_job['id'])
+
+        transcribe_job = self._store.maybe_queue_transcribe_job(
+            project_id=job['project_id'],
+            source_id=job['source_id'],
+            data_dir=self._data_dir,
+        )
+        if transcribe_job is None:
+            return
+
+        self._logger.info('Queued transcribe job %s after separate job %s', transcribe_job['id'], job['id'])
+        running_transcribe_job = self._store.update_job_status(
+            project_id=transcribe_job['project_id'],
+            job_id=transcribe_job['id'],
+            status='running',
+        )
+        if running_transcribe_job is None:
+            raise RuntimeError('Failed to transition queued transcribe job to running')
+        self._process_transcribe_job(running_transcribe_job)
 
     def _process_transcribe_job(self, job: dict[str, str]) -> None:
         self._logger.info('Processing transcribe job %s for source %s', job['id'], job['source_id'])
@@ -411,30 +463,6 @@ class IngestWorker:
         if completed_job is not None:
             self._logger.info('Completed transcribe job %s', completed_job['id'])
 
-        separate_job = self._store.maybe_queue_separate_job(
-            project_id=job['project_id'],
-            source_id=job['source_id'],
-            data_dir=self._data_dir,
-        )
-        if separate_job is None:
-            return
-
-        self._logger.info('Queued separate job %s after transcribe job %s', separate_job['id'], job['id'])
-        running_separate_job = self._store.update_job_status(
-            project_id=separate_job['project_id'],
-            job_id=separate_job['id'],
-            status='running',
-        )
-        if running_separate_job is None:
-            raise RuntimeError('Failed to transition queued separate job to running')
-        self._write_separation_artifacts(running_separate_job, source)
-        completed_separate_job = self._store.update_job_status(
-            project_id=running_separate_job['project_id'],
-            job_id=running_separate_job['id'],
-            status='completed',
-        )
-        if completed_separate_job is not None:
-            self._logger.info('Completed separate job %s', completed_separate_job['id'])
 
     def _process_ingest_job(self, job: dict[str, str]) -> None:
         self._logger.info('Processing ingest job %s for source %s', job['id'], job['source_id'])
@@ -461,23 +489,23 @@ class IngestWorker:
         if completed_job is not None:
             self._logger.info('Completed ingest job %s', completed_job['id'])
 
-        transcribe_job = self._store.maybe_queue_transcribe_job(
+        separate_job = self._store.maybe_queue_separate_job(
             project_id=job['project_id'],
             source_id=job['source_id'],
             data_dir=self._data_dir,
         )
-        if transcribe_job is None:
+        if separate_job is None:
             return
 
-        self._logger.info('Queued transcribe job %s after ingest job %s', transcribe_job['id'], job['id'])
-        running_transcribe_job = self._store.update_job_status(
-            project_id=transcribe_job['project_id'],
-            job_id=transcribe_job['id'],
+        self._logger.info('Queued separate job %s after ingest job %s', separate_job['id'], job['id'])
+        running_separate_job = self._store.update_job_status(
+            project_id=separate_job['project_id'],
+            job_id=separate_job['id'],
             status='running',
         )
-        if running_transcribe_job is None:
-            raise RuntimeError('Failed to transition queued transcribe job to running')
-        self._process_transcribe_job(running_transcribe_job)
+        if running_separate_job is None:
+            raise RuntimeError('Failed to transition queued separate job to running')
+        self._process_separate_job(running_separate_job)
 
     def _run(self) -> None:
         while not self._stop_event.is_set():

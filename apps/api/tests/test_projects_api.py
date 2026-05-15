@@ -303,13 +303,14 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
                 time.sleep(0.05)
 
     assert latest_detail is not None
-    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
+    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'separate', 'transcribe']
     assert latest_detail['jobs'][0]['id'] == job['id']
     assert all(item['status'] == 'completed' for item in latest_detail['jobs'])
 
     source_dir = artifacts_root / project['id'] / source['id']
     transcript_text_path = source_dir / 'transcription' / 'transcript.txt'
     transcript_json_path = source_dir / 'transcription' / 'transcript.json'
+    stems_json_path = source_dir / 'separation' / 'stems.json'
 
     assert transcript_text_path.exists()
     assert transcript_json_path.exists()
@@ -320,7 +321,7 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     assert 'This transcript was generated from persisted media using the real transcription backend.' in transcript_text
     assert transcript_json['project_id'] == project['id']
     assert transcript_json['source_id'] == source['id']
-    assert transcript_json['job_id'] == latest_detail['jobs'][1]['id']
+    assert transcript_json['job_id'] == latest_detail['jobs'][2]['id']
     assert transcript_json['job_type'] == 'transcribe'
     assert transcript_json['backend'] == 'faster-whisper'
     assert transcript_json['language'] == 'en'
@@ -328,8 +329,14 @@ def test_completed_ingest_auto_queues_and_completes_transcribe_job() -> None:
     assert transcript_json['duration_seconds'] >= 0.5
     assert transcript_json['media_duration_seconds'] >= transcript_json['duration_seconds']
     assert transcript_json['segments']
-    assert transcript_json['persisted_media_path'] == 'source_media/downloaded-track.wav'
+    assert transcript_json['persisted_media_path'] == 'separation/vocals.wav'
+    assert transcript_json['transcription_input'] == 'vocals_stem'
+    assert 'Persisted media: separation/vocals.wav' in transcript_text
     assert 'reference-tone' not in transcript_text
+
+    stems_payload = json.loads(stems_json_path.read_text(encoding='utf-8'))
+    assert stems_payload['based_on'] == 'source_media/downloaded-track.wav'
+    assert stems_payload['stems'][0]['path'] == 'separation/vocals.wav'
 
 
 def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> None:
@@ -354,7 +361,7 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
                 time.sleep(0.05)
 
             assert latest_detail is not None
-            assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
+            assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'separate', 'transcribe']
 
             response = client.get(f"/api/projects/{project['id']}/sources/{source['id']}/artifacts")
 
@@ -369,6 +376,9 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
         'manifest.json',
         'raw_source.txt',
         'source_reference.url',
+        'source_media/downloaded-track.wav',
+        'separation/vocals.wav',
+        'separation/instrumental.wav',
         'transcription/transcript.txt',
         'transcription/transcript.json',
         'separation/stems.json',
@@ -407,13 +417,23 @@ def test_source_artifacts_endpoint_returns_ingest_and_transcription_files() -> N
     assert entries_by_path['transcription/transcript.json']['origin'] == 'transcribe_worker'
     assert entries_by_path['transcription/transcript.json']['updated_at']
     assert 'faster-whisper' in entries_by_path['transcription/transcript.json']['preview']
+    assert 'separation/vocals.wav' in entries_by_path['transcription/transcript.json']['preview']
 
     assert entries_by_path['separation/stems.json']['content_type'] == 'application/json'
     assert entries_by_path['separation/stems.json']['stage'] == 'separate'
     assert entries_by_path['separation/stems.json']['role'] == 'stems_manifest'
     assert entries_by_path['separation/stems.json']['origin'] == 'separate_worker'
     assert entries_by_path['separation/stems.json']['updated_at']
-    assert 'vocals' in entries_by_path['separation/stems.json']['preview']
+    assert 'source_media/downloaded-track.wav' in entries_by_path['separation/stems.json']['preview']
+    assert 'separation/vocals.wav' in entries_by_path['separation/stems.json']['preview']
+
+    assert entries_by_path['separation/vocals.wav']['stage'] == 'separate'
+    assert entries_by_path['separation/vocals.wav']['role'] == 'stem_preview'
+    assert entries_by_path['separation/vocals.wav']['origin'] == 'separate_worker'
+
+    assert entries_by_path['separation/instrumental.wav']['stage'] == 'separate'
+    assert entries_by_path['separation/instrumental.wav']['role'] == 'stem_preview'
+    assert entries_by_path['separation/instrumental.wav']['origin'] == 'separate_worker'
 
 
 
@@ -439,6 +459,7 @@ def test_source_artifact_content_endpoint_returns_raw_file_bytes() -> None:
                 time.sleep(0.05)
 
             assert latest_detail is not None
+            assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'separate', 'transcribe']
 
             response = client.get(
                 f"/api/projects/{project['id']}/sources/{source['id']}/artifacts/raw_source.txt/content"
@@ -532,7 +553,7 @@ def test_completed_transcribe_auto_queues_and_completes_separate_job() -> None:
                 time.sleep(0.05)
 
     assert latest_detail is not None
-    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'transcribe', 'separate']
+    assert [item['job_type'] for item in latest_detail['jobs']] == ['ingest', 'separate', 'transcribe']
     assert all(item['status'] == 'completed' for item in latest_detail['jobs'])
     assert latest_detail['sources'][0]['status'] == 'completed'
 
