@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
 function createWavFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), 'songcraft-e2e-'))
@@ -26,8 +26,19 @@ function createWavFixture(): string {
 }
 
 test.describe('songcraft baseline workflows', () => {
-  test('submit-source form updates persistence guidance for local-file ingest', async ({ page }) => {
+  async function createProjectAndOpenDetails(page: Page, projectName: string) {
     await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+    await page.getByLabel('Project name').fill(projectName)
+    await page.getByRole('button', { name: 'Create project' }).click()
+    await expect(page.getByText(`Created project ${projectName}`)).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Project details' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Back to projects' })).toBeVisible()
+  }
+
+  test('submit-source form updates persistence guidance for local-file ingest', async ({ page }) => {
+    const projectName = `E2E Guidance ${Date.now()}`
+    await createProjectAndOpenDetails(page, projectName)
 
     await expect(
       page.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
@@ -51,17 +62,13 @@ test.describe('songcraft baseline workflows', () => {
     const projectName = `E2E Happy Path ${Date.now()}`
     const localFixture = createWavFixture()
 
-    await page.goto('/')
+    await createProjectAndOpenDetails(page, projectName)
 
     await page.getByLabel('Source type').selectOption('local_file')
     await expect(
       page.getByText('Local file sources are copied into source_media/<filename> during ingest.'),
     ).toBeVisible()
     await expect(page.getByLabel('Source value')).toHaveAttribute('placeholder', '/path/to/reference-track.wav')
-
-    await page.getByLabel('Project name').fill(projectName)
-    await page.getByRole('button', { name: 'Create project' }).click()
-    await expect(page.getByText(`Created project ${projectName}`)).toBeVisible()
 
     await page.getByLabel('Source value').fill(localFixture)
     await page.getByRole('button', { name: 'Submit source and queue ingest job' }).click()
@@ -121,15 +128,11 @@ test.describe('songcraft baseline workflows', () => {
     const projectName = `E2E Failure Path ${Date.now()}`
     const sourceValue = `https://youtube.com/watch?v=fail${Date.now()}`
 
-    await page.goto('/')
+    await createProjectAndOpenDetails(page, projectName)
 
     await expect(
       page.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
     ).toBeVisible()
-
-    await page.getByLabel('Project name').fill(projectName)
-    await page.getByRole('button', { name: 'Create project' }).click()
-    await expect(page.getByText(`Created project ${projectName}`)).toBeVisible()
 
     await page.getByLabel('Source value').fill(sourceValue)
     await page.getByRole('button', { name: 'Submit source and queue ingest job' }).click()
