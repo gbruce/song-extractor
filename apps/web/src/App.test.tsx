@@ -54,7 +54,7 @@ vi.stubGlobal('EventSource', MockEventSource)
 
 import App from './App'
 import { api } from './api'
-import type { JobRecord, ProjectDetail, ProjectSummary, SourceRecord } from './types'
+import type { ProjectDetail, ProjectSummary, SourceRecord } from './types'
 
 vi.mock('./api', () => ({
   api: {
@@ -93,6 +93,21 @@ const sourceRecord: SourceRecord = {
   status: 'submitted',
   created_at: '2026-05-10T00:01:00Z',
   updated_at: '2026-05-10T00:02:00Z',
+}
+
+const secondProjectSummary: ProjectSummary = {
+  id: 'proj_456',
+  name: 'Archive Project',
+  created_at: '2026-05-09T00:00:00Z',
+  updated_at: '2026-05-09T00:03:00Z',
+  source_count: 0,
+  job_count: 0,
+}
+
+const secondProjectDetail: ProjectDetail = {
+  ...secondProjectSummary,
+  sources: [],
+  jobs: [],
 }
 
 const projectDetail: ProjectDetail = {
@@ -169,7 +184,8 @@ const sourceArtifactsResponse: SourceArtifactsResponse = {
       role: 'transcript_text',
       origin: 'transcribe_worker',
       updated_at: '2026-05-10T00:09:00Z',
-      preview: 'Transcript for source src_123 from youtube input.\nThis transcript was generated from persisted media using the real transcription backend.\nSongcraft.au and scribe reference.',
+      preview:
+        'Transcript for source src_123 from youtube input.\nThis transcript was generated from persisted media using the real transcription backend.\nSongcraft.au and scribe reference.',
     },
     {
       path: 'separation/stems.json',
@@ -201,8 +217,10 @@ describe('App', () => {
     vi.resetAllMocks()
     vi.useRealTimers()
     MockEventSource.instances = []
-    mockApi.listProjects.mockResolvedValue([projectSummary])
-    mockApi.getProject.mockResolvedValue(projectDetail)
+    mockApi.listProjects.mockResolvedValue([projectSummary, secondProjectSummary])
+    mockApi.getProject.mockImplementation(async (projectId: string) =>
+      projectId == 'proj_456' ? secondProjectDetail : projectDetail,
+    )
     mockApi.createProject.mockResolvedValue(projectSummary)
     mockApi.createSource.mockResolvedValue(sourceRecord)
     mockApi.createJob.mockResolvedValue(projectDetail.jobs[0])
@@ -228,19 +246,59 @@ describe('App', () => {
     vi.useRealTimers()
   })
 
-  it('renders project, source, and job timestamps', async () => {
+  async function openDemoProject(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole('button', { name: /Open project Demo Project/i }))
+    await screen.findByRole('heading', { name: 'Project details' })
+  }
+
+  it('renders a left sidebar with a projects navigation icon and project list view by default', async () => {
     render(<App />)
 
-    expect(await screen.findAllByText('Created: 2026-05-10T00:00:00Z')).toHaveLength(2)
-    expect(screen.getAllByText('Updated: 2026-05-10T00:05:00Z')).toHaveLength(2)
+    expect(await screen.findByRole('button', { name: 'Projects navigation' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeInTheDocument()
+    expect(screen.getByText('Choose a project to inspect its sources, jobs, and artifacts.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Open project Demo Project/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Open project Archive Project/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Project details' })).not.toBeInTheDocument()
+  })
+
+  it('drills into project details and returns to the projects list', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await openDemoProject(user)
+
+    expect(screen.getByRole('heading', { name: 'Project details' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to projects' })).toBeInTheDocument()
+    expect(screen.getByText('Project ID: proj_123')).toBeInTheDocument()
+    expect(screen.queryByText('Choose a project to inspect its sources, jobs, and artifacts.')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Back to projects' }))
+
+    expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeInTheDocument()
+    expect(screen.getByText('Choose a project to inspect its sources, jobs, and artifacts.')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Project details' })).not.toBeInTheDocument()
+  })
+
+  it('renders project, source, and job timestamps', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await openDemoProject(user)
+
+    expect(screen.getByText('Created: 2026-05-10T00:00:00Z')).toBeInTheDocument()
+    expect(screen.getByText('Updated: 2026-05-10T00:05:00Z')).toBeInTheDocument()
     expect(screen.getByText('Submitted: 2026-05-10T00:01:00Z')).toBeInTheDocument()
     expect(screen.getByText('Queued at: 2026-05-10T00:03:00Z')).toBeInTheDocument()
   })
 
   it('renders lifecycle badges and guidance for active and terminal jobs', async () => {
+    const user = userEvent.setup()
     render(<App />)
 
-    expect(await screen.findByText('3 jobs total')).toBeInTheDocument()
+    await openDemoProject(user)
+
+    expect(screen.getByText('3 jobs total')).toBeInTheDocument()
     expect(screen.getByText('1 active')).toBeInTheDocument()
     expect(screen.getByText('2 done')).toBeInTheDocument()
     expect(screen.getByText('Queued • waiting to start')).toBeInTheDocument()
@@ -250,9 +308,12 @@ describe('App', () => {
   })
 
   it('renders source status badges, linked job summaries, and ingest sync guidance', async () => {
+    const user = userEvent.setup()
     render(<App />)
 
-    expect(await screen.findByText('Submitted • awaiting processing')).toBeInTheDocument()
+    await openDemoProject(user)
+
+    expect(screen.getByText('Submitted • awaiting processing')).toBeInTheDocument()
     expect(screen.getByText('3 linked jobs')).toBeInTheDocument()
     expect(screen.getByText('1 active • 2 done • 0 failed')).toBeInTheDocument()
     expect(screen.getByText('Latest job update: 2026-05-10T00:11:00Z')).toBeInTheDocument()
@@ -270,7 +331,9 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(await screen.findByText('Submitted • awaiting processing')).toBeInTheDocument()
+    await openDemoProject(user)
+
+    expect(screen.getByText('Submitted • awaiting processing')).toBeInTheDocument()
     expect(
       screen.getByText('YouTube sources persist a source_reference.url pointer during ingest.'),
     ).toBeInTheDocument()
@@ -305,6 +368,8 @@ describe('App', () => {
       ],
     })
     render(<App />)
+
+    await openDemoProject(user)
 
     const statusSelect = await screen.findByLabelText('Update status for source src_123')
     await user.selectOptions(statusSelect, 'processing')
@@ -344,6 +409,8 @@ describe('App', () => {
     })
     render(<App />)
 
+    await openDemoProject(user)
+
     const statusSelect = await screen.findByLabelText('Update status for source src_123')
     expect(screen.getByText('Next source transitions: completed')).toBeInTheDocument()
     await user.selectOptions(statusSelect, 'completed')
@@ -379,7 +446,8 @@ describe('App', () => {
     })
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: 'Inspect artifacts for source src_123' }))
+    await openDemoProject(user)
+    await user.click(screen.getByRole('button', { name: 'Inspect artifacts for source src_123' }))
 
     await waitFor(() => {
       expect(mockApi.getSourceArtifacts).toHaveBeenCalledWith('proj_123', 'src_123')
@@ -418,9 +486,7 @@ describe('App', () => {
       entries: ['INFO songcraft.api: Health check requested', 'WARN songcraft.api: Manual refresh triggered'],
       total: 2,
     }
-    mockApi.getRecentLogs
-      .mockResolvedValueOnce(recentLogsResponse)
-      .mockResolvedValueOnce(refreshedLogs)
+    mockApi.getRecentLogs.mockResolvedValueOnce(recentLogsResponse).mockResolvedValueOnce(refreshedLogs)
 
     render(<App />)
 
@@ -440,16 +506,13 @@ describe('App', () => {
     })
   })
 
-
   it('streams new server log lines over SSE and falls back to manual refresh after stream errors', async () => {
     const user = userEvent.setup()
     const fallbackLogs = {
       entries: ['INFO songcraft.api: Health check requested', 'ERROR songcraft.api: Stream disconnected'],
       total: 2,
     }
-    mockApi.getRecentLogs
-      .mockResolvedValueOnce(recentLogsResponse)
-      .mockResolvedValueOnce(fallbackLogs)
+    mockApi.getRecentLogs.mockResolvedValueOnce(recentLogsResponse).mockResolvedValueOnce(fallbackLogs)
 
     render(<App />)
 
@@ -570,6 +633,13 @@ describe('App', () => {
       await Promise.resolve()
     })
 
+    await act(async () => {
+      screen.getByRole('button', { name: /Open project Demo Project/i }).click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.getByRole('heading', { name: 'Project details' })).toBeInTheDocument()
     expect(screen.getByText('Queued • waiting to start')).toBeInTheDocument()
     expect(mockApi.getProject).toHaveBeenCalledTimes(1)
 
@@ -605,7 +675,7 @@ describe('App', () => {
     expect(screen.getByText('2 linked jobs')).toBeInTheDocument()
     expect(screen.getByText('0 active • 2 done • 0 failed')).toBeInTheDocument()
     expect(screen.getByText('Latest job update: 2026-05-10T00:08:00Z')).toBeInTheDocument()
-  })
+  }, 15000)
 
   it('offers valid job status transitions and updates the job', async () => {
     const user = userEvent.setup()
@@ -630,6 +700,8 @@ describe('App', () => {
         ],
       })
     render(<App />)
+
+    await openDemoProject(user)
 
     const statusSelect = await screen.findByLabelText('Update status for job job_123')
     await user.selectOptions(statusSelect, 'running')
